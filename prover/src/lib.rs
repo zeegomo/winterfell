@@ -43,7 +43,6 @@
 #[macro_use]
 extern crate alloc;
 
-use air::proof::Queries;
 pub use air::{
     proof::StarkProof, Air, AirContext, Assertion, AuxTraceRandElements, BoundaryConstraint,
     BoundaryConstraintGroup, ConstraintCompositionCoefficients, ConstraintDivisor,
@@ -472,7 +471,7 @@ pub trait Prover {
         // verifier; the channel will be used to commit to values and to draw randomness that
         // should come from the verifier.
         let mut channel = ProverChannel::<Self::Air, E, Self::HashFn, Self::RandomCoin>::new(
-            &air,
+            air,
             pub_inputs_elements.to_elements(),
         );
         let domain = StarkDomain::new(air);
@@ -488,6 +487,7 @@ pub trait Prover {
         assert_eq!(proof_1_polys.poly_size(), proof_2_polys.poly_size());
         assert_eq!(proof_1_polys.poly_size(), domain.trace_length());
 
+        #[allow(clippy::needless_range_loop)]
         for i in 0..proof_1_polys.poly_size() {
             let x = g.exp_vartime((i as u32).into());
             let x_l = x * g.exp_vartime((proof_1_polys.poly_size() as u32).into());
@@ -531,7 +531,7 @@ pub trait Prover {
         );
         let trace_states_2 = proof_2_polys.evaluate_at(z);
         let b_states = b_polys.evaluate_at(z);
-        channel.send_ood_trace_states(&vec![
+        channel.send_ood_trace_states(&[
             trace_states_1.clone(),
             trace_states_2.clone(),
             b_states.clone(),
@@ -619,8 +619,8 @@ pub trait Prover {
         let placeholder = b_queries[0].clone();
         let queries = trace_1_queries
             .into_iter()
-            .chain(trace_2_queries.into_iter())
-            .chain(b_queries.into_iter())
+            .chain(trace_2_queries)
+            .chain(b_queries)
             .collect::<Vec<_>>();
         // build the proof object
         // trace proofs are the same as the one in the original proofs, so we just ignore them

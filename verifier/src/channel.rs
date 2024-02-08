@@ -380,6 +380,7 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
         self.pow_nonce
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn read_queried_trace_1_states(
         &mut self,
         positions: &[usize],
@@ -395,6 +396,7 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
         Ok((queries.main_states, queries.aux_states))
     }
 
+    #[allow(clippy::type_complexity)]
     pub fn read_queried_trace_2_states(
         &mut self,
         positions: &[usize],

@@ -5,7 +5,7 @@
 
 use super::{constraints::CompositionPoly, StarkDomain, TracePolyTable};
 use air::DeepCompositionCoefficients;
-use math::{add_in_place, fft, mul_acc, polynom, ExtensionOf, FieldElement, StarkField};
+use math::{add_in_place, fft, mul_acc, polynom, ExtensionOf, FieldElement};
 use utils::{collections::Vec, iter_mut};
 
 #[cfg(feature = "concurrent")]
@@ -93,7 +93,7 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
 
             // compute T''(x) = T(x) - T(z * g), multiply it by a pseudo-random coefficient,
             // and add the result into composition polynomial
-            if let Some(_) = next_z {
+            if next_z.is_some() {
                 acc_trace_poly::<E::BaseField, E>(
                     &mut t2_composition,
                     poly,
@@ -118,7 +118,7 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
 
             // compute T''(x) = T(x) - T(z * g), multiply it by a pseudo-random coefficient,
             // and add the result into composition polynomial
-            if let Some(_) = next_z {
+            if next_z.is_some() {
                 acc_trace_poly::<E, E>(
                     &mut t2_composition,
                     poly,
