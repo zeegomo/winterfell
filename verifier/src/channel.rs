@@ -227,6 +227,197 @@ where
     }
 }
 
+pub struct LinkVerifierChannel<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> {
+    // // trace queries
+    // trace_1_roots: Vec<H::Digest>,
+    // trace_2_roots: Vec<H::Digest>,
+    // constraint queries
+    b_roots: Vec<H::Digest>,
+    b_queries: Option<TraceQueries<E, H>>,
+    // FRI proof
+    fri_roots: Option<Vec<H::Digest>>,
+    fri_layer_proofs: Vec<BatchMerkleProof<H>>,
+    fri_layer_queries: Vec<Vec<E>>,
+    fri_remainder: Option<Vec<E>>,
+    fri_num_partitions: usize,
+    // out-of-domain frame
+    ood_evaluations: Option<Vec<E>>,
+    // query proof-of-work
+    pow_nonce: u64,
+}
+
+impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierChannel<E, H> {
+    // CONSTRUCTOR
+    // --------------------------------------------------------------------------------------------
+    /// Creates and returns a new [VerifierChannel] initialized from the specified `proof`.
+    pub fn new<A: Air<BaseField = E::BaseField>>(
+        air: &A,
+        proof: StarkProof,
+    ) -> Result<Self, VerifierError> {
+        let StarkProof {
+            context,
+            commitments,
+            trace_queries,
+            constraint_queries,
+            ood_frame,
+            fri_proof,
+            pow_nonce,
+        } = proof;
+
+        // make sure AIR and proof base fields are the same
+        if E::BaseField::get_modulus_le_bytes() != context.field_modulus_bytes() {
+            return Err(VerifierError::InconsistentBaseField);
+        }
+        let num_trace_segments = air.trace_layout().num_segments();
+        let main_trace_width = air.trace_layout().main_trace_width();
+        let aux_trace_width = air.trace_layout().aux_trace_width();
+        let lde_domain_size = air.lde_domain_size();
+        let fri_options = air.options().to_fri_options();
+
+        // --- parse commitments ------------------------------------------------------------------
+        let (b_roots, fri_roots) = commitments
+            .parse_link::<H>(
+                num_trace_segments,
+                fri_options.num_fri_layers(lde_domain_size),
+            )
+            .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
+
+        // --- parse trace and constraint queries -------------------------------------------------
+        let b_queries = TraceQueries::new(trace_queries, air)?;
+        // let constraint_queries = ConstraintQueries::new(constraint_queries, air)?;
+
+        // --- parse FRI proofs -------------------------------------------------------------------
+        let fri_num_partitions = fri_proof.num_partitions();
+        let fri_remainder = fri_proof
+            .parse_remainder()
+            .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
+        let (fri_layer_queries, fri_layer_proofs) = fri_proof
+            .parse_layers::<H, E>(lde_domain_size, fri_options.folding_factor())
+            .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
+
+        // --- parse out-of-domain evaluation frame -----------------------------------------------
+        let (ood_evaluations, ood_constraint_evaluations) = ood_frame
+            .parse_link(main_trace_width, aux_trace_width)
+            .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
+
+        Ok(Self {
+            // trace queries
+            // trace_roots,
+            b_roots,
+            b_queries: Some(b_queries),
+            // constraint queries
+            // FRI proof
+            fri_roots: Some(fri_roots),
+            fri_layer_proofs,
+            fri_layer_queries,
+            fri_remainder: Some(fri_remainder),
+            fri_num_partitions,
+            // out-of-domain evaluation
+            ood_evaluations: Some(ood_evaluations),
+            // query seed
+            pow_nonce,
+        })
+    }
+
+    // DATA READERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns execution trace commitments sent by the prover.
+    ///
+    /// For computations requiring multiple trace segment, the returned slice will contain a
+    /// commitment for each trace segment.
+    pub fn read_trace_commitments(&self) -> &[H::Digest] {
+        todo!()
+    }
+
+    pub fn trace_1(&self) -> Vec<E> {
+        self.ood_evaluations
+            .unwrap()
+            .chunks(3)
+            .map(|[trace_1, _trace_2, _b]| *trace_1)
+            .collect()
+    }
+
+    pub fn trace_2(&self) -> Vec<E> {
+        self.ood_evaluations
+            .unwrap()
+            .chunks(3)
+            .map(|[_trace_1, trace_2, _b]| *trace_2)
+            .collect()
+    }
+
+    pub fn b(&self) -> Vec<E> {
+        self.ood_evaluations
+            .unwrap()
+            .chunks(3)
+            .map(|[_trace_1, _trace_2, b]| *b)
+            .collect()
+    }
+
+    pub fn read_b_commitments(&self) -> &[H::Digest] {
+        &self.b_roots
+    }
+
+    /// Retur
+    /// Returns query proof-of-work nonce sent by the prover.
+    pub fn read_pow_nonce(&self) -> u64 {
+        self.pow_nonce
+    }
+
+    /// Returns trace states at the specified positions of the LDE domain. This also checks if
+    /// the trace states are valid against the trace commitment sent by the prover.
+    ///
+    /// For computations requiring multiple trace segments, trace states for auxiliary segments
+    /// are also included as the second value of the returned tuple (trace states for all auxiliary
+    /// segments are merged into a single table). Otherwise, the second value is None.
+    #[allow(clippy::type_complexity)]
+    pub fn read_queried_b_states(
+        &mut self,
+        positions: &[usize],
+    ) -> Result<(Table<E::BaseField>, Option<Table<E>>), VerifierError> {
+        let queries = self.b_queries.take().expect("already read");
+
+        // make sure the states included in the proof correspond to the trace commitment
+        for (root, proof) in self.b_roots.iter().zip(queries.query_proofs.iter()) {
+            MerkleTree::verify_batch(root, positions, proof)
+                .map_err(|_| VerifierError::TraceQueryDoesNotMatchCommitment)?;
+        }
+
+        Ok((queries.main_states, queries.aux_states))
+    }
+}
+
+// FRI VERIFIER CHANNEL IMPLEMENTATION
+// ================================================================================================
+
+impl<E, H> FriVerifierChannel<E> for LinkVerifierChannel<E, H>
+where
+    E: FieldElement,
+    H: ElementHasher<BaseField = E::BaseField>,
+{
+    type Hasher = H;
+
+    fn read_fri_num_partitions(&self) -> usize {
+        self.fri_num_partitions
+    }
+
+    fn read_fri_layer_commitments(&mut self) -> Vec<H::Digest> {
+        self.fri_roots.take().expect("already read")
+    }
+
+    fn take_next_fri_layer_proof(&mut self) -> BatchMerkleProof<H> {
+        self.fri_layer_proofs.remove(0)
+    }
+
+    fn take_next_fri_layer_queries(&mut self) -> Vec<E> {
+        self.fri_layer_queries.remove(0)
+    }
+
+    fn take_fri_remainder(&mut self) -> Vec<E> {
+        self.fri_remainder.take().expect("already read")
+    }
+}
+
 // TRACE QUERIES
 // ================================================================================================
 

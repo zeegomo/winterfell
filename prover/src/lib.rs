@@ -460,12 +460,19 @@ pub trait Prover {
         &self,
         proof_1_polys: TracePolyTable<E>,
         proof_2_polys: TracePolyTable<E>,
-        mut channel: ProverChannel<Self::Air, E, Self::HashFn, Self::RandomCoin>,
         air: &Self::Air,
+        pub_inputs_elements: <<Self as Prover>::Air as Air>::PublicInputs,
     ) -> Result<StarkProof, ProverError>
     where
         E: FieldElement<BaseField = Self::BaseField>,
     {
+        // create a channel which is used to simulate interaction between the prover and the
+        // verifier; the channel will be used to commit to values and to draw randomness that
+        // should come from the verifier.
+        let mut channel = ProverChannel::<Self::Air, E, Self::HashFn, Self::RandomCoin>::new(
+            &air,
+            pub_inputs_elements.to_elements(),
+        );
         let domain = StarkDomain::new(air);
         // 4 ----- build DEEP composition polynomial ----------------------------------------------
         #[cfg(feature = "std")]
@@ -513,18 +520,18 @@ pub trait Prover {
         // from an extension field, rather than increasing the size of the field overall.
         let z = channel.get_ood_point();
 
-        let trace_states_1 = vec![proof_1_polys.evaluate_at(
+        let trace_states_1 = proof_1_polys.evaluate_at(
             z * g
                 .exp_vartime((proof_1_polys.poly_size() as u32).into())
                 .into(),
-        )];
-        channel.send_ood_trace_states(&trace_states_1);
-        let trace_states_2 = vec![proof_2_polys.evaluate_at(z)];
-        channel.send_ood_trace_states(&trace_states_2);
-
-        let ood_evaluations = b_polys.evaluate_at(z);
-        channel.send_ood_constraint_evaluations(&ood_evaluations);
-
+        );
+        let trace_states_2 = proof_2_polys.evaluate_at(z);
+        let b_states = b_polys.evaluate_at(z);
+        channel.send_ood_trace_states(&vec![
+            trace_states_1.clone(),
+            trace_states_2.clone(),
+            b_states.clone(),
+        ]);
         // draw random coefficients to use during DEEP polynomial composition, and use them to
         // initialize the DEEP composition polynomial
         let deep_coefficients = channel.get_deep_composition_coeffs();
@@ -532,10 +539,9 @@ pub trait Prover {
 
         // combine all trace polynomials together and merge them into the DEEP composition
         // polynomial
-        deep_composition_poly.add_trace_polys(proof_1_polys, trace_states_1, None);
-        deep_composition_poly.add_trace_polys(proof_2_polys, trace_states_2, None);
-
-        deep_composition_poly.add_trace_polys(b_polys, vec![ood_evaluations], None);
+        deep_composition_poly.add_trace_polys(proof_1_polys, vec![trace_states_1], None);
+        deep_composition_poly.add_trace_polys(proof_2_polys, vec![trace_states_2], None);
+        deep_composition_poly.add_trace_polys(b_polys, vec![b_states], None);
 
         #[cfg(feature = "std")]
         debug!(

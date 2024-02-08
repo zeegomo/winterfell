@@ -55,7 +55,7 @@ use crypto::{ElementHasher, RandomCoin};
 use fri::FriVerifier;
 
 mod channel;
-use channel::VerifierChannel;
+use channel::{LinkVerifierChannel, VerifierChannel};
 
 mod evaluator;
 use evaluator::evaluate_constraints;
@@ -281,6 +281,150 @@ where
     );
     let c_composition = composer
         .compose_constraint_evaluations(queried_constraint_evaluations, ood_constraint_evaluations);
+    let deep_evaluations = composer.combine_compositions(t_composition, c_composition);
+
+    // 7 ----- Verify low-degree proof -------------------------------------------------------------
+    // make sure that evaluations of the DEEP composition polynomial we computed in the previous
+    // step are in fact evaluations of a polynomial of degree equal to trace polynomial degree
+    fri_verifier
+        .verify(&mut channel, &deep_evaluations, &query_positions)
+        .map_err(VerifierError::FriVerificationFailed)
+}
+
+// VERIFICATION PROCEDURE
+// ================================================================================================
+/// Performs the actual verification by reading the data from the `channel` and making sure it
+/// attests to a correct execution of the computation specified by the provided `air`.
+pub fn perform_link_verification<A, E, H, R>(
+    air: A,
+    mut channel: LinkVerifierChannel<E, H>,
+    mut public_coin: R,
+) -> Result<(), VerifierError>
+where
+    A: Air,
+    E: FieldElement<BaseField = A::BaseField>,
+    H: ElementHasher<BaseField = A::BaseField>,
+    R: RandomCoin<BaseField = A::BaseField, Hasher = H>,
+{
+    // 1 ----- trace commitment -------------------------------------------------------------------
+    // Read the commitments to evaluations of the trace polynomials over the LDE domain sent by the
+    // prover. The commitments are used to update the public coin, and draw sets of random elements
+    // from the coin (in the interactive version of the protocol the verifier sends these random
+    // elements to the prover after each commitment is made). When there are multiple trace
+    // commitments (i.e., the trace consists of more than one segment), each previous commitment is
+    // used to draw random elements needed to construct the next trace segment. The last trace
+    // commitment is used to draw a set of random coefficients which the prover uses to compute
+    // constraint composition polynomial.
+    let b_commitments = channel.read_trace_commitments();
+
+    // reseed the coin with the commitment to the main trace segment
+    public_coin.reseed(b_commitments[0]);
+
+    // // process auxiliary trace segments (if any), to build a set of random elements for each segment
+    // let mut aux_trace_rand_elements = AuxTraceRandElements::<E>::new();
+    // for (i, commitment) in trace_commitments.iter().skip(1).enumerate() {
+    //     let rand_elements = air
+    //         .get_aux_trace_segment_random_elements(i, &mut public_coin)
+    //         .map_err(|_| VerifierError::RandomCoinError)?;
+    //     aux_trace_rand_elements.add_segment_elements(rand_elements);
+    //     public_coin.reseed(*commitment);
+    // }
+
+    // // build random coefficients for the composition polynomial
+    // let constraint_coeffs = air
+    //     .get_constraint_composition_coefficients(&mut public_coin)
+    //     .map_err(|_| VerifierError::RandomCoinError)?;
+
+    // // 2 ----- constraint commitment --------------------------------------------------------------
+    // // read the commitment to evaluations of the constraint composition polynomial over the LDE
+    // // domain sent by the prover, use it to update the public coin, and draw an out-of-domain point
+    // // z from the coin; in the interactive version of the protocol, the verifier sends this point z
+    // // to the prover, and the prover evaluates trace and constraint composition polynomials at z,
+    // // and sends the results back to the verifier.
+    // let constraint_commitment = channel.read_constraint_commitment();
+    // public_coin.reseed(constraint_commitment);
+    let z = public_coin
+        .draw::<E>()
+        .map_err(|_| VerifierError::RandomCoinError)?;
+
+    // 3 ----- OOD consistency check --------------------------------------------------------------
+    // make sure that evaluations obtained by evaluating constraints over the out-of-domain frame
+    // are consistent with the evaluations of composition polynomial columns sent by the prover
+
+    // read the out-of-domain trace frames (the main trace frame and auxiliary trace frame, if
+    // provided) sent by the prover and evaluate constraints over them; also, reseed the public
+    // coin with the OOD frames received from the prover.
+    let proof_1_evals = channel.trace_1();
+    let proof_2_evals = channel.trace_2();
+    let b_expected = proof_1_evals[0] - proof_2_evals[0];
+    // read evaluations of composition polynomial columns sent by the prover, and reduce them into
+    // a single value by computing \sum_{i=0}^{m-1}(z^(i * l) * value_i), where value_i is the
+    // evaluation of the ith column polynomial H_i(X) at z, l is the trace length and m is
+    // the number of composition column polynomials. This computes H(z) (i.e.
+    // the evaluation of the composition polynomial at z) using the fact that
+    // H(X) = \sum_{i=0}^{m-1} X^{i * l} H_i(X).
+    // Also, reseed the public coin with the OOD constraint evaluations received from the prover.
+    let b_evals = channel.b();
+    let b_actual = b_evals[0];
+    // finally, make sure the values are the same
+    if b_expected != b_actual {
+        return Err(VerifierError::InconsistentOodConstraintEvaluations);
+    }
+
+    // 4 ----- FRI commitments --------------------------------------------------------------------
+    // draw coefficients for computing DEEP composition polynomial from the public coin; in the
+    // interactive version of the protocol, the verifier sends these coefficients to the prover
+    // and the prover uses them to compute the DEEP composition polynomial. the prover, then
+    // applies FRI protocol to the evaluations of the DEEP composition polynomial.
+    let deep_coefficients = air
+        .get_deep_composition_coefficients::<E, R>(&mut public_coin)
+        .map_err(|_| VerifierError::RandomCoinError)?;
+
+    // instantiates a FRI verifier with the FRI layer commitments read from the channel. From the
+    // verifier's perspective, this is equivalent to executing the commit phase of the FRI protocol.
+    // The verifier uses these commitments to update the public coin and draw random points alpha
+    // from them; in the interactive version of the protocol, the verifier sends these alphas to
+    // the prover, and the prover uses them to compute and commit to the subsequent FRI layers.
+    let fri_verifier = FriVerifier::new(
+        &mut channel,
+        &mut public_coin,
+        air.options().to_fri_options(),
+        air.trace_poly_degree(),
+    )
+    .map_err(VerifierError::FriVerificationFailed)?;
+    // TODO: make sure air.lde_domain_size() == fri_verifier.domain_size()
+
+    // 5 ----- trace and constraint queries -------------------------------------------------------
+    // read proof-of-work nonce sent by the prover and update the public coin with it
+    let pow_nonce = channel.read_pow_nonce();
+    public_coin.reseed_with_int(pow_nonce);
+
+    // make sure the proof-of-work specified by the grinding factor is satisfied
+    if public_coin.leading_zeros() < air.options().grinding_factor() {
+        return Err(VerifierError::QuerySeedProofOfWorkVerificationFailed);
+    }
+
+    // draw pseudo-random query positions for the LDE domain from the public coin; in the
+    // interactive version of the protocol, the verifier sends these query positions to the prover,
+    // and the prover responds with decommitments against these positions for trace and constraint
+    // composition polynomial evaluations.
+    let query_positions = public_coin
+        .draw_integers(air.options().num_queries(), air.lde_domain_size())
+        .map_err(|_| VerifierError::RandomCoinError)?;
+
+    // read evaluations of trace and constraint composition polynomials at the queried positions;
+    // this also checks that the read values are valid against trace and constraint commitments
+    let (queried_b_states, queried_b_aux_trace_states) =
+        channel.read_queried_b_states(&query_positions)?;
+    // 6 ----- DEEP composition -------------------------------------------------------------------
+    // compute evaluations of the DEEP composition polynomial at the queried positions
+    let composer = DeepComposer::new(&air, &query_positions, z, deep_coefficients);
+    let t_composition = composer.compose_trace_columns(
+        queried_main_trace_states,
+        queried_aux_trace_states,
+        ood_main_trace_frame,
+        ood_aux_trace_frame,
+    );
     let deep_evaluations = composer.combine_compositions(t_composition, c_composition);
 
     // 7 ----- Verify low-degree proof -------------------------------------------------------------

@@ -140,7 +140,12 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
         };
 
         // set the coefficients of the DEEP composition polynomial
-        self.coefficients = trace_poly;
+        if self.coefficients.is_empty() {
+            self.coefficients = trace_poly;
+        } else {
+            add_in_place(&mut self.coefficients, &trace_poly);
+        }
+
         assert_eq!(self.poly_size() - 2, self.degree());
     }
 
