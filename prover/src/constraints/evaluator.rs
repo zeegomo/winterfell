@@ -102,7 +102,7 @@ impl<'a, A: Air, E: FieldElement<BaseField = A::BaseField>> ConstraintEvaluator<
         // then don't bother with concurrent evaluation
 
         #[cfg(not(feature = "concurrent"))]
-        let num_fragments = 1;
+        let num_fragments = 4;
 
         #[cfg(feature = "concurrent")]
         let num_fragments = if domain.ce_domain_size() >= MIN_CONCURRENT_DOMAIN_SIZE {

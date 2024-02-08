@@ -64,14 +64,13 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
         &mut self,
         trace_polys: TracePolyTable<E>,
         ood_trace_states: Vec<Vec<E>>,
+        next_z: Option<E>,
     ) {
         assert!(self.coefficients.is_empty());
 
         // compute a second out-of-domain point offset from z by exactly trace generator; this
         // point defines the "next" computation state in relation to point z
         let trace_length = trace_polys.poly_size();
-        let g = E::from(E::BaseField::get_root_of_unity(trace_length.ilog2()));
-        let next_z = self.z * g;
 
         // combine trace polynomials into 2 composition polynomials T'(x) and T''(x)
         let mut t1_composition = E::zeroed_vector(trace_length);
@@ -94,12 +93,14 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
 
             // compute T''(x) = T(x) - T(z * g), multiply it by a pseudo-random coefficient,
             // and add the result into composition polynomial
-            acc_trace_poly::<E::BaseField, E>(
-                &mut t2_composition,
-                poly,
-                ood_trace_states[1][i],
-                self.cc.trace[i],
-            );
+            if let Some(_) = next_z {
+                acc_trace_poly::<E::BaseField, E>(
+                    &mut t2_composition,
+                    poly,
+                    ood_trace_states[1][i],
+                    self.cc.trace[i],
+                );
+            }
 
             i += 1;
         }
@@ -117,12 +118,14 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
 
             // compute T''(x) = T(x) - T(z * g), multiply it by a pseudo-random coefficient,
             // and add the result into composition polynomial
-            acc_trace_poly::<E, E>(
-                &mut t2_composition,
-                poly,
-                ood_trace_states[1][i],
-                self.cc.trace[i],
-            );
+            if let Some(_) = next_z {
+                acc_trace_poly::<E, E>(
+                    &mut t2_composition,
+                    poly,
+                    ood_trace_states[1][i],
+                    self.cc.trace[i],
+                );
+            }
 
             i += 1;
         }
@@ -130,8 +133,11 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
         // divide the composition polynomials by (x - z) and (x - z * g), respectively,
         // and add the resulting polynomials together; the output of this step
         // is a single trace polynomial T(x) and deg(T(x)) = trace_length - 2.
-        let trace_poly =
-            merge_trace_compositions(vec![t1_composition, t2_composition], vec![self.z, next_z]);
+        let trace_poly = if let Some(next_z) = next_z {
+            merge_trace_compositions(vec![t1_composition, t2_composition], vec![self.z, next_z])
+        } else {
+            merge_trace_compositions(vec![t1_composition], vec![self.z])
+        };
 
         // set the coefficients of the DEEP composition polynomial
         self.coefficients = trace_poly;

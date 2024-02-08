@@ -55,6 +55,10 @@ impl<E: FieldElement> TracePolyTable<E> {
         self.main_segment_polys.num_rows()
     }
 
+    pub fn evaluate_base_field_at(&self, x: E::BaseField) -> Vec<E::BaseField> {
+        self.main_segment_polys.evaluate_columns_at(x)
+    }
+
     /// Evaluates all trace polynomials (across all trace segments) at the specified point `x`.
     pub fn evaluate_at(&self, x: E) -> Vec<E> {
         let mut result = self.main_segment_polys.evaluate_columns_at(x);
