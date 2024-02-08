@@ -137,6 +137,73 @@ impl<E: FieldElement> DeepComposer<E> {
             .collect()
     }
 
+    pub fn compose_trace_columns_link(
+        &self,
+        queried_states: Table<E::BaseField>,
+        queried_aux_trace_states: Option<Table<E>>,
+        ood_main_frame: Vec<E>,
+        ood_aux_frame: Option<Vec<E>>,
+    ) -> Vec<E> {
+        // compose columns of of the main trace segment; we do this separately for numerators of
+        // each query; we also track common denominator for each query separately; this way we can
+        // use a batch inversion in the end.
+        let n = queried_states.num_rows();
+        let mut result_num = Vec::<E>::with_capacity(n);
+        let mut result_den = Vec::<E>::with_capacity(n);
+
+        for ((_, row), &x) in (0..n).zip(queried_states.rows()).zip(&self.x_coordinates) {
+            let mut t1_num = E::ZERO;
+
+            for (i, &value) in row.iter().enumerate() {
+                let value = E::from(value);
+                // compute the numerator of T'_i(x) as (T_i(x) - T_i(z)), multiply it by a
+                // composition coefficient, and add the result to the numerator aggregator
+                t1_num += (value - ood_main_frame[i]) * self.cc.trace[i];
+            }
+            // compute the common denominator as (x - z) * (x - z * g)
+            let t1_den = x - self.z[0];
+            result_den.push(t1_den);
+
+            // add the numerators of T'_i(x) and T''_i(x) together; we can do this because later on
+            // we'll use the common denominator computed above.
+            result_num.push(t1_num);
+        }
+
+        // if the trace has auxiliary segments, compose columns from these segments as well; we
+        // also do this separately for numerators and denominators.
+        if let Some(queried_aux_trace_states) = queried_aux_trace_states {
+            let ood_aux_frame = ood_aux_frame.expect("missing auxiliary OOD frame");
+            let ood_aux_trace_states = ood_aux_frame;
+
+            // we define this offset here because composition of the main trace columns has
+            // consumed some number of composition coefficients already.
+            let cc_offset = queried_states.num_columns();
+
+            for ((j, row), &_x) in (0..n)
+                .zip(queried_aux_trace_states.rows())
+                .zip(&self.x_coordinates)
+            {
+                let mut t1_num = E::ZERO;
+                for (i, &value) in row.iter().enumerate() {
+                    // compute the numerator of T'_i(x) as (T_i(x) - T_i(z)), multiply it by a
+                    // composition coefficient, and add the result to the numerator aggregator
+                    t1_num += (value - ood_aux_trace_states[i]) * self.cc.trace[cc_offset + i];
+                }
+
+                // compute the common denominators (x - z) and (x - z * g), and use the to aggregate
+                // numerators into the common numerator computed for the main trace of this query
+                result_num[j] += t1_num;
+            }
+        }
+
+        result_den = batch_inversion(&result_den);
+        result_num
+            .iter()
+            .zip(result_den)
+            .map(|(n, d)| *n * d)
+            .collect()
+    }
+
     /// For each queried set of composition polynomial column evaluations, combine evaluations
     /// into a single value by computing their random linear combination as follows:
     ///

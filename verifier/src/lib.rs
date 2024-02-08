@@ -315,9 +315,15 @@ where
     // used to draw random elements needed to construct the next trace segment. The last trace
     // commitment is used to draw a set of random coefficients which the prover uses to compute
     // constraint composition polynomial.
-    let b_commitments = channel.read_trace_commitments();
+    let main_trace_width = air.trace_layout().main_trace_width();
+    let aux_trace_width = air.trace_layout().aux_trace_width();
+    let trace_1_commitments = channel.read_trace_1_commitments();
+    let trace_2_commitments = channel.read_trace_2_commitments();
+    let b_commitments = channel.read_b_commitments();
 
     // reseed the coin with the commitment to the main trace segment
+    public_coin.reseed(trace_1_commitments[0]);
+    public_coin.reseed(trace_2_commitments[0]);
     public_coin.reseed(b_commitments[0]);
 
     // // process auxiliary trace segments (if any), to build a set of random elements for each segment
@@ -354,9 +360,14 @@ where
     // read the out-of-domain trace frames (the main trace frame and auxiliary trace frame, if
     // provided) sent by the prover and evaluate constraints over them; also, reseed the public
     // coin with the OOD frames received from the prover.
-    let proof_1_evals = channel.trace_1();
-    let proof_2_evals = channel.trace_2();
-    let b_expected = proof_1_evals[0] - proof_2_evals[0];
+    let mut trace_1_ood_main_evals = channel.trace_1();
+    let trace_1_ood_aux_evals = trace_1_ood_main_evals.split_off(main_trace_width);
+    let mut trace_2_ood_main_evals = channel.trace_2();
+    let trace_2_ood_aux_evals = trace_2_ood_main_evals.split_off(aux_trace_width);
+    let mut b_ood_main_evals = channel.b();
+    let b_ood_aux_evals = b_ood_main_evals.split_off(main_trace_width);
+
+    let b_expected = trace_1_ood_main_evals[0] - trace_2_ood_main_evals[0];
     // read evaluations of composition polynomial columns sent by the prover, and reduce them into
     // a single value by computing \sum_{i=0}^{m-1}(z^(i * l) * value_i), where value_i is the
     // evaluation of the ith column polynomial H_i(X) at z, l is the trace length and m is
@@ -412,6 +423,11 @@ where
         .draw_integers(air.options().num_queries(), air.lde_domain_size())
         .map_err(|_| VerifierError::RandomCoinError)?;
 
+    let (queried_trace_1_main_states, queried_trace_1_aux_states) =
+        channel.read_queried_trace_1_states(&query_positions)?;
+
+    let (queried_trace_2_main_states, queried_trace_2_aux_states) =
+        channel.read_queried_trace_2_states(&query_positions)?;
     // read evaluations of trace and constraint composition polynomials at the queried positions;
     // this also checks that the read values are valid against trace and constraint commitments
     let (queried_b_states, queried_b_aux_trace_states) =
@@ -419,13 +435,26 @@ where
     // 6 ----- DEEP composition -------------------------------------------------------------------
     // compute evaluations of the DEEP composition polynomial at the queried positions
     let composer = DeepComposer::new(&air, &query_positions, z, deep_coefficients);
-    let t_composition = composer.compose_trace_columns(
-        queried_main_trace_states,
-        queried_aux_trace_states,
-        ood_main_trace_frame,
-        ood_aux_trace_frame,
+    let t1_composition = composer.compose_trace_columns_link(
+        queried_trace_1_main_states,
+        queried_trace_1_aux_states,
+        trace_1_ood_main_evals,
+        Some(trace_1_ood_aux_evals),
     );
-    let deep_evaluations = composer.combine_compositions(t_composition, c_composition);
+    let t2_composition = composer.compose_trace_columns_link(
+        queried_trace_2_main_states,
+        queried_trace_2_aux_states,
+        trace_2_ood_main_evals,
+        Some(trace_2_ood_aux_evals),
+    );
+    let b_composition = composer.compose_trace_columns_link(
+        queried_b_states,
+        queried_b_aux_trace_states,
+        b_ood_main_evals,
+        Some(b_ood_aux_evals),
+    );
+    let mut deep_evaluations = composer.combine_compositions(t1_composition, t2_composition);
+    deep_evaluations = composer.combine_compositions(deep_evaluations, b_composition);
 
     // 7 ----- Verify low-degree proof -------------------------------------------------------------
     // make sure that evaluations of the DEEP composition polynomial we computed in the previous

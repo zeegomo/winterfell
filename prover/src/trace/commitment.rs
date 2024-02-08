@@ -97,7 +97,6 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> TraceCommitmen
     // --------------------------------------------------------------------------------------------
 
     /// Returns the root of the commitment Merkle tree.
-    #[cfg(test)]
     pub fn main_trace_root(&self) -> H::Digest {
         *self.main_segment_tree.root()
     }

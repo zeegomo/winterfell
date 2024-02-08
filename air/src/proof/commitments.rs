@@ -90,12 +90,20 @@ impl Commitments {
         self,
         num_trace_segments: usize,
         num_fri_layers: usize,
-    ) -> Result<(Vec<H::Digest>, Vec<H::Digest>), DeserializationError> {
+    ) -> Result<
+        (
+            Vec<H::Digest>,
+            Vec<H::Digest>,
+            Vec<H::Digest>,
+            Vec<H::Digest>,
+        ),
+        DeserializationError,
+    > {
         let mut reader = SliceReader::new(&self.0);
 
         // parse trace commitments
-        // let proof1_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
-        // let proof2_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
+        let proof1_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
+        let proof2_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
         let b_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
 
         // read FRI commitments (+ 1 for remainder polynomial commitment)
@@ -106,8 +114,8 @@ impl Commitments {
             return Err(DeserializationError::UnconsumedBytes);
         }
         Ok((
-            // proof1_commitments,
-            // proof2_commitments,
+            proof1_commitments,
+            proof2_commitments,
             b_commitments,
             fri_commitments,
         ))

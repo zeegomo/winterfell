@@ -458,6 +458,8 @@ pub trait Prover {
     #[doc(hidden)]
     fn generate_link_proof<E>(
         &self,
+        trace_1_commitment: &TraceCommitment<E, <Self as Prover>::HashFn>,
+        trace_2_commitment: &TraceCommitment<E, <Self as Prover>::HashFn>,
         proof_1_polys: TracePolyTable<E>,
         proof_2_polys: TracePolyTable<E>,
         air: &Self::Air,
@@ -502,6 +504,8 @@ pub trait Prover {
 
         // commit to the LDE of the main trace by writing the root of its Merkle tree into
         // the channel
+        channel.commit_trace(trace_1_commitment.main_trace_root());
+        channel.commit_trace(trace_2_commitment.main_trace_root());
         channel.commit_trace(*b_trace_tree.root());
 
         // initialize trace commitment and trace polynomial table structs with the main trace
@@ -609,12 +613,18 @@ pub trait Prover {
         // query the constraint commitment at the selected positions; for each query, we need just
         // a Merkle authentication path. this is because constraint evaluations for each step are
         // merged into a single value and Merkle authentication paths contain these values already
+        let trace_1_queries = trace_1_commitment.query(&query_positions);
+        let trace_2_queries = trace_2_commitment.query(&query_positions);
         let b_queries = b_commitment.query(&query_positions);
-
         let placeholder = b_queries[0].clone();
+        let queries = trace_1_queries
+            .into_iter()
+            .chain(trace_2_queries.into_iter())
+            .chain(b_queries.into_iter())
+            .collect::<Vec<_>>();
         // build the proof object
         // trace proofs are the same as the one in the original proofs, so we just ignore them
-        let proof = channel.build_proof(b_queries, placeholder, fri_proof);
+        let proof = channel.build_proof(queries, placeholder, fri_proof);
         #[cfg(feature = "std")]
         debug!("Built proof object in {} ms", now.elapsed().as_millis());
 

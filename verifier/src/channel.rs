@@ -228,11 +228,11 @@ where
 }
 
 pub struct LinkVerifierChannel<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> {
-    // // trace queries
-    // trace_1_roots: Vec<H::Digest>,
-    // trace_2_roots: Vec<H::Digest>,
-    // constraint queries
+    trace_1_roots: Vec<H::Digest>,
+    trace_2_roots: Vec<H::Digest>,
     b_roots: Vec<H::Digest>,
+    trace_1_queries: Option<TraceQueries<E, H>>,
+    trace_2_queries: Option<TraceQueries<E, H>>,
     b_queries: Option<TraceQueries<E, H>>,
     // FRI proof
     fri_roots: Option<Vec<H::Digest>>,
@@ -257,8 +257,8 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
         let StarkProof {
             context,
             commitments,
-            trace_queries,
-            constraint_queries,
+            mut trace_queries,
+            constraint_queries: _,
             ood_frame,
             fri_proof,
             pow_nonce,
@@ -275,7 +275,7 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
         let fri_options = air.options().to_fri_options();
 
         // --- parse commitments ------------------------------------------------------------------
-        let (b_roots, fri_roots) = commitments
+        let (trace_1_roots, trace_2_roots, b_roots, fri_roots) = commitments
             .parse_link::<H>(
                 num_trace_segments,
                 fri_options.num_fri_layers(lde_domain_size),
@@ -283,7 +283,12 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
         // --- parse trace and constraint queries -------------------------------------------------
-        let b_queries = TraceQueries::new(trace_queries, air)?;
+        let queries_length = trace_queries.len() / 3;
+        let mut trace_2_queries = trace_queries.split_off(queries_length);
+        let b_queries = trace_2_queries.split_off(queries_length);
+        let trace_1_queries = TraceQueries::new(trace_queries, air)?;
+        let trace_2_queries = TraceQueries::new(trace_2_queries, air)?;
+        let b_queries = TraceQueries::new(b_queries, air)?;
         // let constraint_queries = ConstraintQueries::new(constraint_queries, air)?;
 
         // --- parse FRI proofs -------------------------------------------------------------------
@@ -296,14 +301,18 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
         // --- parse out-of-domain evaluation frame -----------------------------------------------
-        let (ood_evaluations, ood_constraint_evaluations) = ood_frame
+        let (ood_evaluations, _) = ood_frame
             .parse_link(main_trace_width, aux_trace_width)
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
         Ok(Self {
             // trace queries
             // trace_roots,
+            trace_1_roots,
+            trace_2_roots,
             b_roots,
+            trace_1_queries: Some(trace_1_queries),
+            trace_2_queries: Some(trace_2_queries),
             b_queries: Some(b_queries),
             // constraint queries
             // FRI proof
@@ -326,42 +335,79 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
     ///
     /// For computations requiring multiple trace segment, the returned slice will contain a
     /// commitment for each trace segment.
-    pub fn read_trace_commitments(&self) -> &[H::Digest] {
-        todo!()
+    pub fn read_trace_1_commitments(&self) -> &[H::Digest] {
+        &self.trace_1_roots
     }
 
-    pub fn trace_1(&self) -> Vec<E> {
-        self.ood_evaluations
-            .unwrap()
-            .chunks(3)
-            .map(|[trace_1, _trace_2, _b]| *trace_1)
-            .collect()
-    }
-
-    pub fn trace_2(&self) -> Vec<E> {
-        self.ood_evaluations
-            .unwrap()
-            .chunks(3)
-            .map(|[_trace_1, trace_2, _b]| *trace_2)
-            .collect()
-    }
-
-    pub fn b(&self) -> Vec<E> {
-        self.ood_evaluations
-            .unwrap()
-            .chunks(3)
-            .map(|[_trace_1, _trace_2, b]| *b)
-            .collect()
+    pub fn read_trace_2_commitments(&self) -> &[H::Digest] {
+        &self.trace_2_roots
     }
 
     pub fn read_b_commitments(&self) -> &[H::Digest] {
         &self.b_roots
     }
 
+    pub fn trace_1(&self) -> Vec<E> {
+        self.ood_evaluations
+            .as_ref()
+            .unwrap()
+            .chunks(3)
+            .map(|values| values[0])
+            .collect()
+    }
+
+    pub fn trace_2(&self) -> Vec<E> {
+        self.ood_evaluations
+            .as_ref()
+            .unwrap()
+            .chunks(3)
+            .map(|values| values[1])
+            .collect()
+    }
+
+    pub fn b(&self) -> Vec<E> {
+        self.ood_evaluations
+            .as_ref()
+            .unwrap()
+            .chunks(3)
+            .map(|values| values[2])
+            .collect()
+    }
+
     /// Retur
     /// Returns query proof-of-work nonce sent by the prover.
     pub fn read_pow_nonce(&self) -> u64 {
         self.pow_nonce
+    }
+
+    pub fn read_queried_trace_1_states(
+        &mut self,
+        positions: &[usize],
+    ) -> Result<(Table<E::BaseField>, Option<Table<E>>), VerifierError> {
+        let queries = self.trace_1_queries.take().expect("already read");
+
+        // make sure the states included in the proof correspond to the trace commitment
+        for (root, proof) in self.trace_1_roots.iter().zip(queries.query_proofs.iter()) {
+            MerkleTree::verify_batch(root, positions, proof)
+                .map_err(|_| VerifierError::TraceQueryDoesNotMatchCommitment)?;
+        }
+
+        Ok((queries.main_states, queries.aux_states))
+    }
+
+    pub fn read_queried_trace_2_states(
+        &mut self,
+        positions: &[usize],
+    ) -> Result<(Table<E::BaseField>, Option<Table<E>>), VerifierError> {
+        let queries = self.trace_2_queries.take().expect("already read");
+
+        // make sure the states included in the proof correspond to the trace commitment
+        for (root, proof) in self.trace_2_roots.iter().zip(queries.query_proofs.iter()) {
+            MerkleTree::verify_batch(root, positions, proof)
+                .map_err(|_| VerifierError::TraceQueryDoesNotMatchCommitment)?;
+        }
+
+        Ok((queries.main_states, queries.aux_states))
     }
 
     /// Returns trace states at the specified positions of the LDE domain. This also checks if
