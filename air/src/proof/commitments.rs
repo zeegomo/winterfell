@@ -3,6 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree.
 
+use core::num;
+
 use crypto::Hasher;
 use utils::{
     collections::Vec, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -22,7 +24,7 @@ use utils::{
 /// Internally, the commitments are stored as a sequence of bytes. Thus, to retrieve the
 /// commitments, [parse()](Commitments::parse) function should be used.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
-pub struct Commitments(Vec<u8>);
+pub struct Commitments(pub Vec<u8>);
 
 impl Commitments {
     // CONSTRUCTOR
@@ -100,11 +102,14 @@ impl Commitments {
         DeserializationError,
     > {
         let mut reader = SliceReader::new(&self.0);
-
+        // println!("reading {} {}", num_trace_segments, num_fri_layers);
         // parse trace commitments
         let proof1_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
+        // println!("read proof 1 {}", reader.pos);
         let proof2_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
+        // println!("read proof 2 {}", reader.pos);
         let b_commitments = H::Digest::read_batch_from(&mut reader, num_trace_segments)?;
+        // println!("read b");
 
         // read FRI commitments (+ 1 for remainder polynomial commitment)
         let fri_commitments = H::Digest::read_batch_from(&mut reader, num_fri_layers + 1)?;

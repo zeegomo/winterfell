@@ -143,6 +143,7 @@ impl<E: FieldElement> DeepComposer<E> {
         queried_aux_trace_states: Option<Table<E>>,
         ood_main_frame: Vec<E>,
         ood_aux_frame: Option<Vec<E>>,
+        z: E,
     ) -> Vec<E> {
         // compose columns of of the main trace segment; we do this separately for numerators of
         // each query; we also track common denominator for each query separately; this way we can
@@ -150,7 +151,6 @@ impl<E: FieldElement> DeepComposer<E> {
         let n = queried_states.num_rows();
         let mut result_num = Vec::<E>::with_capacity(n);
         let mut result_den = Vec::<E>::with_capacity(n);
-
         for ((_, row), &x) in (0..n).zip(queried_states.rows()).zip(&self.x_coordinates) {
             let mut t1_num = E::ZERO;
 
@@ -161,14 +161,13 @@ impl<E: FieldElement> DeepComposer<E> {
                 t1_num += (value - ood_main_frame[i]) * self.cc.trace[i];
             }
             // compute the common denominator as (x - z) * (x - z * g)
-            let t1_den = x - self.z[0];
+            let t1_den = x - z;
             result_den.push(t1_den);
 
             // add the numerators of T'_i(x) and T''_i(x) together; we can do this because later on
             // we'll use the common denominator computed above.
             result_num.push(t1_num);
         }
-
         // if the trace has auxiliary segments, compose columns from these segments as well; we
         // also do this separately for numerators and denominators.
         if let Some(queried_aux_trace_states) = queried_aux_trace_states {

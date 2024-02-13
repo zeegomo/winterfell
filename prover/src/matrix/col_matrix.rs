@@ -27,7 +27,7 @@ use utils::iterators::*;
 /// - A matrix must consist of at least 1 column and at least 2 rows.
 /// - All columns must be of the same length.
 /// - Number of rows must be a power of two.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ColMatrix<E: FieldElement> {
     columns: Vec<Vec<E>>,
 }
@@ -199,6 +199,18 @@ impl<E: FieldElement> ColMatrix<E> {
             .map(|evaluations| {
                 let mut column = evaluations.clone();
                 fft::interpolate_poly(&mut column, &inv_twiddles);
+                column
+            })
+            .collect();
+        Self { columns }
+    }
+
+    pub fn interpolate_columns_with_offset(&self, offset: E::BaseField) -> Self {
+        let inv_twiddles = fft::get_inv_twiddles::<E::BaseField>(self.num_rows());
+        let columns = iter!(self.columns)
+            .map(|evaluations| {
+                let mut column = evaluations.clone();
+                fft::interpolate_poly_with_offset(&mut column, &inv_twiddles, offset);
                 column
             })
             .collect();

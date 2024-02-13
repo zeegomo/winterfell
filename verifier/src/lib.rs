@@ -42,7 +42,7 @@ pub use air::{
 pub use math;
 use math::{
     fields::{CubeExtension, QuadExtension},
-    FieldElement, ToElements,
+    FieldElement, StarkField, ToElements,
 };
 
 pub use utils::{
@@ -121,6 +121,93 @@ where
             let public_coin = RandCoin::new(&public_coin_seed);
             let channel = VerifierChannel::new(&air, proof)?;
             perform_verification::<AIR, CubeExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
+        },
+    }
+}
+
+#[rustfmt::skip]
+pub fn verify_link<AIR, HashFn, RandCoin>(
+    proof_1: StarkProof,
+    proof_2: StarkProof,
+    link_proof: StarkProof,
+    pub_inputs: AIR::PublicInputs,
+) -> Result<(), VerifierError> 
+where 
+    AIR: Air, 
+    HashFn: ElementHasher<BaseField = AIR::BaseField>,
+    RandCoin: RandomCoin<BaseField = AIR::BaseField, Hasher = HashFn>,
+{
+    let proof = link_proof;
+
+    
+    // build a seed for the public coin; the initial seed is a hash of the proof context and the
+    // public inputs, but as the protocol progresses, the coin will be reseeded with the info
+    // received from the prover
+    let mut public_coin_seed = proof.context.to_elements();
+    public_coin_seed.append(&mut pub_inputs.to_elements());
+    
+    // create AIR instance for the computation specified in the proof
+    let air = AIR::new(proof.get_trace_info(), pub_inputs, proof.options().clone());
+
+
+    
+
+    // figure out which version of the generic proof verification procedure to run. this is a sort
+    // of static dispatch for selecting two generic parameter: extension field and hash function.
+    match air.options().field_extension() {
+        FieldExtension::None => {
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = LinkVerifierChannel::new(&air, proof)?;
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
+
+           
+            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+                println!("inconsistent 1 {:?} {:?}", channel_1.read_trace_commitments()[0], channel.read_trace_1_commitments()[0]);
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+
+            if channel_2.read_trace_commitments()[0] != channel.read_trace_2_commitments()[0] {
+                println!("inconsistent 2 {:?} {:?} |\n {:?} |\n {:?}", channel_2.read_trace_commitments()[0], channel.read_trace_2_commitments()[0], channel.read_trace_1_commitments()[0], channel.read_b_commitments()[0]);
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+
+            perform_link_verification::<AIR, AIR::BaseField, HashFn, RandCoin>(air, channel, public_coin)
+        },
+        FieldExtension::Quadratic => {
+            if !<QuadExtension<AIR::BaseField>>::is_supported() {
+                return Err(VerifierError::UnsupportedFieldExtension(2));
+            }
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = LinkVerifierChannel::new(&air, proof)?;
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
+
+            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+
+            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+            perform_link_verification::<AIR, QuadExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
+        },
+        FieldExtension::Cubic => {
+            if !<CubeExtension<AIR::BaseField>>::is_supported() {
+                return Err(VerifierError::UnsupportedFieldExtension(3));
+            }
+            let public_coin = RandCoin::new(&public_coin_seed);
+            let channel = LinkVerifierChannel::new(&air, proof)?;
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
+            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+
+            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
+                return Err(VerifierError::InconsistentTraceCommitments);
+            }
+            perform_link_verification::<AIR, CubeExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
         },
     }
 }
@@ -352,7 +439,10 @@ where
     let z = public_coin
         .draw::<E>()
         .map_err(|_| VerifierError::RandomCoinError)?;
-
+    let trace_length = air.trace_info().length() as u32;
+    let g = E::BaseField::get_root_of_unity(trace_length.ilog2());
+    // println!("{trace_length} g: {}", g);
+    let next_z = z * g.exp_vartime((trace_length - 2).into()).into();
     // 3 ----- OOD consistency check --------------------------------------------------------------
     // make sure that evaluations obtained by evaluating constraints over the out-of-domain frame
     // are consistent with the evaluations of composition polynomial columns sent by the prover
@@ -360,14 +450,37 @@ where
     // read the out-of-domain trace frames (the main trace frame and auxiliary trace frame, if
     // provided) sent by the prover and evaluate constraints over them; also, reseed the public
     // coin with the OOD frames received from the prover.
+    let mut result = Vec::new();
     let mut trace_1_ood_main_evals = channel.trace_1();
-    let trace_1_ood_aux_evals = trace_1_ood_main_evals.split_off(main_trace_width);
     let mut trace_2_ood_main_evals = channel.trace_2();
-    let trace_2_ood_aux_evals = trace_2_ood_main_evals.split_off(aux_trace_width);
     let mut b_ood_main_evals = channel.b();
+
+    for i in 0..main_trace_width {
+        result.push(trace_1_ood_main_evals[i]);
+        result.push(trace_2_ood_main_evals[i]);
+        result.push(b_ood_main_evals[i]);
+    }
+
+    let trace_1_ood_aux_evals = trace_1_ood_main_evals.split_off(main_trace_width);
+    let trace_2_ood_aux_evals = trace_2_ood_main_evals.split_off(main_trace_width);
     let b_ood_aux_evals = b_ood_main_evals.split_off(main_trace_width);
 
-    let b_expected = trace_1_ood_main_evals[0] - trace_2_ood_main_evals[0];
+    public_coin.reseed(H::hash_elements(&result));
+    for i in 0..main_trace_width {
+        let b_expected = (trace_1_ood_main_evals[i] - trace_2_ood_main_evals[i]) / (z - E::ONE);
+        let b_actual = b_ood_main_evals[i];
+        // finally, make sure the values are the same
+        if b_expected != b_actual {
+            println!("constraint: {i} {} {}", b_expected, b_actual);
+            return Err(VerifierError::InconsistentOodConstraintEvaluations);
+        }
+    }
+
+    // println!(
+    //     "VERIFIER: z: {}, next_z: {next_z} f_1(next_z): {}, f_2(z): {}, b(z): {} / {}",
+    //     z, trace_1_ood_main_evals[0], trace_2_ood_main_evals[0], b_ood_main_evals[0], b_expected
+    // );
+
     // read evaluations of composition polynomial columns sent by the prover, and reduce them into
     // a single value by computing \sum_{i=0}^{m-1}(z^(i * l) * value_i), where value_i is the
     // evaluation of the ith column polynomial H_i(X) at z, l is the trace length and m is
@@ -375,12 +488,7 @@ where
     // the evaluation of the composition polynomial at z) using the fact that
     // H(X) = \sum_{i=0}^{m-1} X^{i * l} H_i(X).
     // Also, reseed the public coin with the OOD constraint evaluations received from the prover.
-    let b_evals = channel.b();
-    let b_actual = b_evals[0];
-    // finally, make sure the values are the same
-    if b_expected != b_actual {
-        return Err(VerifierError::InconsistentOodConstraintEvaluations);
-    }
+    // let b_evals = channel.b();
 
     // 4 ----- FRI commitments --------------------------------------------------------------------
     // draw coefficients for computing DEEP composition polynomial from the public coin; in the
@@ -435,26 +543,33 @@ where
     // 6 ----- DEEP composition -------------------------------------------------------------------
     // compute evaluations of the DEEP composition polynomial at the queried positions
     let composer = DeepComposer::new(&air, &query_positions, z, deep_coefficients);
+    // println!("composing one {}", trace_1_ood_main_evals.len());
     let t1_composition = composer.compose_trace_columns_link(
         queried_trace_1_main_states,
         queried_trace_1_aux_states,
         trace_1_ood_main_evals,
         Some(trace_1_ood_aux_evals),
+        next_z,
     );
+    // println!("composing one {}", trace_2_ood_main_evals.len());
     let t2_composition = composer.compose_trace_columns_link(
         queried_trace_2_main_states,
         queried_trace_2_aux_states,
         trace_2_ood_main_evals,
         Some(trace_2_ood_aux_evals),
+        z,
     );
     let b_composition = composer.compose_trace_columns_link(
         queried_b_states,
         queried_b_aux_trace_states,
         b_ood_main_evals,
         Some(b_ood_aux_evals),
+        z,
     );
     let mut deep_evaluations = composer.combine_compositions(t1_composition, t2_composition);
     deep_evaluations = composer.combine_compositions(deep_evaluations, b_composition);
+
+    // println!("{:?}", deep_evaluations);
 
     // 7 ----- Verify low-degree proof -------------------------------------------------------------
     // make sure that evaluations of the DEEP composition polynomial we computed in the previous

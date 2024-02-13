@@ -536,4 +536,4 @@ pub use prover::{
     StarkProof, Trace, TraceInfo, TraceLayout, TraceTable, TraceTableFragment,
     TransitionConstraintDegree,
 };
-pub use verifier::{verify, VerifierError};
+pub use verifier::{verify, verify_link, VerifierError};

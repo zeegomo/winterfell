@@ -87,6 +87,11 @@ where
     /// also reseeds the public coin with the hashes of the evaluation frame states.
     pub fn send_ood_trace_states(&mut self, trace_states: &[Vec<E>]) {
         let result = self.ood_frame.set_trace_states(trace_states);
+        // println!(
+        //     "reseeding with {:?} {:?}",
+        //     &result,
+        //     H::hash_elements(&result)
+        // );
         self.public_coin.reseed(H::hash_elements(&result));
     }
 

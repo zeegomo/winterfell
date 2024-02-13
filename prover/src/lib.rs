@@ -183,6 +183,27 @@ pub trait Prover {
         }
     }
 
+    #[rustfmt::skip]
+    fn prove_link(&self, trace_1: &Self::Trace, trace_2: &Self::Trace) -> Result<StarkProof, ProverError> {
+        // figure out which version of the generic proof generation procedure to run. this is a sort
+        // of static dispatch for selecting two generic parameter: extension field and hash function.
+        match self.options().field_extension() {
+            FieldExtension::None => self.generate_link_proof::<Self::BaseField>(trace_1, trace_2),
+            FieldExtension::Quadratic => {
+                if !<QuadExtension<Self::BaseField>>::is_supported() {
+                    return Err(ProverError::UnsupportedFieldExtension(2));
+                }
+                self.generate_link_proof::<QuadExtension<Self::BaseField>>(trace_1, trace_2)
+            }
+            FieldExtension::Cubic => {
+                if !<CubeExtension<Self::BaseField>>::is_supported() {
+                    return Err(ProverError::UnsupportedFieldExtension(3));
+                }
+                self.generate_link_proof::<CubeExtension<Self::BaseField>>(trace_1, trace_2)
+            }
+        }
+    }
+
     // HELPER METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -237,11 +258,12 @@ pub trait Prover {
         // initialize trace commitment and trace polynomial table structs with the main trace
         // data; for multi-segment traces these structs will be used as accumulators of all
         // trace segments
-        let mut trace_commitment = TraceCommitment::new(
-            main_trace_lde,
-            main_trace_tree,
-            domain.trace_to_lde_blowup(),
-        );
+        let mut trace_commitment: TraceCommitment<E, <Self as Prover>::HashFn> =
+            TraceCommitment::new(
+                main_trace_lde,
+                main_trace_tree,
+                domain.trace_to_lde_blowup(),
+            );
         let mut trace_polys = TracePolyTable::new(main_trace_polys);
         let poly_size = trace_polys.poly_size();
 
@@ -368,6 +390,7 @@ pub trait Prover {
         deep_composition_poly.add_trace_polys(
             trace_polys,
             ood_trace_states,
+            z,
             Some(E::from(E::BaseField::get_root_of_unity(poly_size.ilog2())) * z),
         );
 
@@ -457,55 +480,110 @@ pub trait Prover {
     #[doc(hidden)]
     fn generate_link_proof<E>(
         &self,
-        trace_1_commitment: &TraceCommitment<E, <Self as Prover>::HashFn>,
-        trace_2_commitment: &TraceCommitment<E, <Self as Prover>::HashFn>,
-        proof_1_polys: TracePolyTable<E>,
-        proof_2_polys: TracePolyTable<E>,
-        air: &Self::Air,
-        pub_inputs_elements: <<Self as Prover>::Air as Air>::PublicInputs,
+        trace_1: &Self::Trace,
+        trace_2: &Self::Trace,
     ) -> Result<StarkProof, ProverError>
     where
         E: FieldElement<BaseField = Self::BaseField>,
     {
+        let pub_inputs = self.get_pub_inputs(&trace_1);
+        let air = Self::Air::new(trace_1.get_info(), pub_inputs, self.options().clone());
         // create a channel which is used to simulate interaction between the prover and the
         // verifier; the channel will be used to commit to values and to draw randomness that
         // should come from the verifier.
         let mut channel = ProverChannel::<Self::Air, E, Self::HashFn, Self::RandomCoin>::new(
-            air,
-            pub_inputs_elements.to_elements(),
+            &air,
+            self.get_pub_inputs(&trace_1).to_elements(),
         );
-        let domain = StarkDomain::new(air);
+        let domain = StarkDomain::new(&air);
         // 4 ----- build DEEP composition polynomial ----------------------------------------------
         #[cfg(feature = "std")]
         let now = Instant::now();
 
-        // We construct a polynomial B(x) = (proof_1_poly(x*g^l) - proof_2_poly(x) ) / (x - 1) and show that
-        // it's low degree, where l is the length of the proofs
-        let g = E::BaseField::get_root_of_unity(proof_1_polys.poly_size().ilog2());
-        let mut b_evals = vec![E::BaseField::ZERO; proof_1_polys.poly_size()];
+        // extend the main execution trace and build a Merkle tree from the extended trace
+        let (main_trace_1_lde, main_trace_1_tree, main_trace_1_polys) =
+            self.build_trace_commitment::<Self::BaseField>(trace_1.main_segment(), &domain);
 
-        assert_eq!(proof_1_polys.poly_size(), proof_2_polys.poly_size());
-        assert_eq!(proof_1_polys.poly_size(), domain.trace_length());
+        let (main_trace_2_lde, main_trace_2_tree, main_trace_2_polys) =
+            self.build_trace_commitment::<Self::BaseField>(trace_2.main_segment(), &domain);
+
+        let mut trace_1_polys = TracePolyTable::new(main_trace_1_polys);
+        let mut trace_2_polys = TracePolyTable::new(main_trace_2_polys);
+
+        // initialize trace commitment and trace polynomial table structs with the main trace
+        // data; for multi-segment traces these structs will be used as accumulators of all
+        // trace segments
+        let mut trace_1_commitment: TraceCommitment<E, <Self as Prover>::HashFn> =
+            TraceCommitment::new(
+                main_trace_1_lde,
+                main_trace_1_tree,
+                domain.trace_to_lde_blowup(),
+            );
+        let mut trace_2_commitment: TraceCommitment<E, <Self as Prover>::HashFn> =
+            TraceCommitment::new(
+                main_trace_2_lde,
+                main_trace_2_tree,
+                domain.trace_to_lde_blowup(),
+            );
+
+        // We construct a polynomial B(x) = (proof_1_poly(x*g^(l-1)) - proof_2_poly(x) ) / (x - 1) and show that
+        // it's low degree, where l is the length of the proofs
+        let g = E::BaseField::get_root_of_unity(trace_1_polys.poly_size().ilog2());
+        let mut b_evals =
+            vec![vec![E::BaseField::ZERO; trace_1.length()]; trace_1.main_trace_width()];
+        // println!("{} g: {g}", trace_1_polys.poly_size().ilog2());
+        assert_eq!(trace_1_polys.poly_size(), trace_2_polys.poly_size());
+        assert_eq!(trace_1_polys.poly_size(), domain.trace_length());
+
+        // evaluatins are at g^0 - g^(size -1) but the last row is padding
+        let offset = (trace_1_polys.poly_size() - 2) as u32;
+        assert_eq!(
+            trace_1_polys.evaluate_base_field_at(g.exp_vartime(offset.into()))[0],
+            trace_2_polys.evaluate_base_field_at(E::BaseField::ONE)[0]
+        );
+        assert_eq!(
+            trace_2_polys.evaluate_base_field_at(E::BaseField::ONE)[0],
+            trace_2.main_segment().get(0, 0)
+        );
+        // println!("cycle: {}", trace_2.main_segment().get(0, 0));
 
         #[allow(clippy::needless_range_loop)]
-        for i in 0..proof_1_polys.poly_size() {
-            let x = g.exp_vartime((i as u32).into());
-            let x_l = x * g.exp_vartime((proof_1_polys.poly_size() as u32).into());
-            let proof_1_eval = proof_1_polys.evaluate_base_field_at(x_l)[0];
-            let proof_2_eval = proof_2_polys.evaluate_base_field_at(x)[0];
-            b_evals[i] = (proof_1_eval - proof_2_eval) / (x - E::BaseField::ONE);
+        for i in 0..trace_1.length() {
+            for col in &mut b_evals {
+                let x = g.exp_vartime((i as u32).into()) * E::BaseField::GENERATOR;
+                let x_l = x * g.exp_vartime(offset.into()).into();
+                let trace_1_eval = trace_1_polys.evaluate_base_field_at(x_l)[0];
+                let trace_2_eval = trace_2_polys.evaluate_base_field_at(x)[0];
+                assert_ne!(x, E::BaseField::ONE);
+                col[i] = (trace_1_eval - trace_2_eval) / (x - E::BaseField::ONE);
+                assert_eq!(
+                    col[i],
+                    (trace_1_eval - trace_2_eval) / (x - E::BaseField::ONE)
+                );
+            }
         }
 
-        let b_evals = ColMatrix::new(vec![b_evals]);
+        let b_evals = ColMatrix::new(b_evals);
 
         // extend the main execution trace and build a Merkle tree from the extended trace
-        let (b_trace_lde, b_trace_tree, b_trace_polys) =
-            self.build_trace_commitment::<Self::BaseField>(&b_evals, &domain);
+        let (b_trace_lde, b_trace_tree, b_trace_polys) = self
+            .build_trace_commitment_with_offset::<Self::BaseField>(
+                &b_evals,
+                &domain,
+                E::BaseField::GENERATOR,
+            );
 
         // commit to the LDE of the main trace by writing the root of its Merkle tree into
         // the channel
+        // println!("adding link commitments");
         channel.commit_trace(trace_1_commitment.main_trace_root());
         channel.commit_trace(trace_2_commitment.main_trace_root());
+
+        println!(
+            "1: {:?} 2: {:?}",
+            trace_1_commitment.main_trace_root(),
+            trace_2_commitment.main_trace_root()
+        );
         channel.commit_trace(*b_trace_tree.root());
 
         // initialize trace commitment and trace polynomial table structs with the main trace
@@ -515,6 +593,19 @@ pub trait Prover {
             <TraceCommitment<E, _>>::new(b_trace_lde, b_trace_tree, domain.trace_to_lde_blowup());
         let b_polys = TracePolyTable::new(b_trace_polys);
 
+        for i in 0..trace_1.length() {
+            let x = g.exp_vartime((i as u32).into()) * E::BaseField::GENERATOR;
+            let x_l = x * g.exp_vartime(offset.into()).into();
+            let trace_1_eval = trace_1_polys.evaluate_base_field_at(x_l)[0];
+            let trace_2_eval = trace_2_polys.evaluate_base_field_at(x)[0];
+            assert_ne!(x, E::BaseField::ONE);
+            let b_eval = b_polys.evaluate_base_field_at(x)[0];
+            assert_eq!(
+                b_eval,
+                (trace_1_eval - trace_2_eval) / (x - E::BaseField::ONE)
+            );
+        }
+
         // draw an out-of-domain point z. Depending on the type of E, the point is drawn either
         // from the base field or from an extension field defined by E.
         //
@@ -523,14 +614,30 @@ pub trait Prover {
         // is drawn from, and we can potentially save on performance by only drawing this point
         // from an extension field, rather than increasing the size of the field overall.
         let z = channel.get_ood_point();
-
-        let trace_states_1 = proof_1_polys.evaluate_at(
-            z * g
-                .exp_vartime((proof_1_polys.poly_size() as u32).into())
-                .into(),
-        );
-        let trace_states_2 = proof_2_polys.evaluate_at(z);
+        let next_z = z * g.exp_vartime(offset.into()).into();
+        let trace_states_1 = trace_1_polys.evaluate_at(next_z);
+        let trace_states_2 = trace_2_polys.evaluate_at(z);
         let b_states = b_polys.evaluate_at(z);
+        // println!(
+        //     "PROVER: z: {}, next_z: {} f_1(next_z): {}, f_2(z): {} b(z): {}/{}",
+        //     z,
+        //     next_z,
+        //     trace_states_1[0],
+        //     trace_states_2[0],
+        //     b_states[0],
+        //     (trace_states_1[0] - trace_states_2[0]) / (z - E::ONE),
+        // );
+        assert_eq!(
+            b_states[0],
+            (trace_states_1[0] - trace_states_2[0]) / (z - E::ONE)
+        );
+
+        // println!(
+        //     "lengths: {} {} {}",
+        //     trace_states_1.len(),
+        //     trace_states_2.len(),
+        //     b_states.len()
+        // );
         channel.send_ood_trace_states(&[
             trace_states_1.clone(),
             trace_states_2.clone(),
@@ -543,9 +650,9 @@ pub trait Prover {
 
         // combine all trace polynomials together and merge them into the DEEP composition
         // polynomial
-        deep_composition_poly.add_trace_polys(proof_1_polys, vec![trace_states_1], None);
-        deep_composition_poly.add_trace_polys(proof_2_polys, vec![trace_states_2], None);
-        deep_composition_poly.add_trace_polys(b_polys, vec![b_states], None);
+        deep_composition_poly.add_trace_polys(trace_1_polys, vec![trace_states_1], next_z, None);
+        deep_composition_poly.add_trace_polys(trace_2_polys, vec![trace_states_2], z, None);
+        deep_composition_poly.add_trace_polys(b_polys, vec![b_states], z, None);
 
         #[cfg(feature = "std")]
         debug!(
@@ -575,7 +682,7 @@ pub trait Prover {
             now.elapsed().as_millis()
         );
 
-        // 6 ----- compute FRI layers for the composition polynomial ------------------------------
+        // 6 ----- compute FRI layers for the composition polynomial ------------------------------3
         #[cfg(feature = "std")]
         let now = Instant::now();
         let mut fri_prover = FriProver::new(air.options().to_fri_options());
@@ -677,7 +784,44 @@ pub trait Prover {
 
         (trace_lde, trace_tree, trace_polys)
     }
+    fn build_trace_commitment_with_offset<E>(
+        &self,
+        trace: &ColMatrix<E>,
+        domain: &StarkDomain<Self::BaseField>,
+        offset: Self::BaseField,
+    ) -> (RowMatrix<E>, MerkleTree<Self::HashFn>, ColMatrix<E>)
+    where
+        E: FieldElement<BaseField = Self::BaseField>,
+    {
+        // extend the execution trace
+        #[cfg(feature = "std")]
+        let now = Instant::now();
+        let trace_polys = trace.interpolate_columns_with_offset(offset);
+        let trace_lde =
+            RowMatrix::evaluate_polys_over::<DEFAULT_SEGMENT_WIDTH>(&trace_polys, domain);
+        #[cfg(feature = "std")]
+        debug!(
+            "Extended execution trace of {} columns from 2^{} to 2^{} steps ({}x blowup) in {} ms",
+            trace_lde.num_cols(),
+            trace_polys.num_rows().ilog2(),
+            trace_lde.num_rows().ilog2(),
+            domain.trace_to_lde_blowup(),
+            now.elapsed().as_millis()
+        );
 
+        // build trace commitment
+        #[cfg(feature = "std")]
+        let now = Instant::now();
+        let trace_tree = trace_lde.commit_to_rows();
+        #[cfg(feature = "std")]
+        debug!(
+            "Computed execution trace commitment (Merkle tree of depth {}) in {} ms",
+            trace_tree.depth(),
+            now.elapsed().as_millis()
+        );
+
+        (trace_lde, trace_tree, trace_polys)
+    }
     /// Evaluates constraint composition polynomial over the LDE domain and builds a commitment
     /// to these evaluations.
     ///

@@ -64,9 +64,10 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
         &mut self,
         trace_polys: TracePolyTable<E>,
         ood_trace_states: Vec<Vec<E>>,
+        z: E,
         next_z: Option<E>,
     ) {
-        assert!(self.coefficients.is_empty());
+        // assert!(self.coefficients.is_empty());
 
         // compute a second out-of-domain point offset from z by exactly trace generator; this
         // point defines the "next" computation state in relation to point z
@@ -134,9 +135,9 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
         // and add the resulting polynomials together; the output of this step
         // is a single trace polynomial T(x) and deg(T(x)) = trace_length - 2.
         let trace_poly = if let Some(next_z) = next_z {
-            merge_trace_compositions(vec![t1_composition, t2_composition], vec![self.z, next_z])
+            merge_trace_compositions(vec![t1_composition, t2_composition], vec![z, next_z])
         } else {
-            merge_trace_compositions(vec![t1_composition], vec![self.z])
+            merge_trace_compositions(vec![t1_composition], vec![z])
         };
 
         // set the coefficients of the DEEP composition polynomial
