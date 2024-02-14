@@ -536,4 +536,4 @@ pub use prover::{
     ProverError, RowMatrix, Serializable, SliceReader, StarkProof, Trace, TraceCommitment,
     TraceInfo, TraceLayout, TraceTable, TraceTableFragment, TransitionConstraintDegree,
 };
-pub use verifier::{verify, verify_link, VerifierError};
+pub use verifier::{verify, VerifierError};
