@@ -529,11 +529,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use prover::{
-    crypto, iterators, math, Air, AirContext, Assertion, AuxTraceRandElements, BoundaryConstraint,
-    BoundaryConstraintGroup, ByteReader, ByteWriter, ColMatrix, ConstraintCompositionCoefficients,
-    ConstraintDivisor, DeepCompositionCoefficients, Deserializable, DeserializationError,
-    EvaluationFrame, FieldExtension, ProofOptions, Prover, ProverError, Serializable, SliceReader,
-    StarkProof, Trace, TraceInfo, TraceLayout, TraceTable, TraceTableFragment,
-    TransitionConstraintDegree,
+    self, crypto, iterators, math, Air, AirContext, Assertion, AuxTraceRandElements,
+    BoundaryConstraint, BoundaryConstraintGroup, ByteReader, ByteWriter, ColMatrix,
+    ConstraintCompositionCoefficients, ConstraintDivisor, DeepCompositionCoefficients,
+    Deserializable, DeserializationError, EvaluationFrame, FieldExtension, ProofOptions, Prover,
+    ProverError, RowMatrix, Serializable, SliceReader, StarkProof, Trace, TraceCommitment,
+    TraceInfo, TraceLayout, TraceTable, TraceTableFragment, TransitionConstraintDegree,
 };
-pub use verifier::{verify, VerifierError};
+pub use verifier::{verify, verify_link, VerifierError};

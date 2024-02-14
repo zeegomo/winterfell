@@ -54,7 +54,7 @@ pub use utils::{
     SliceReader,
 };
 
-use fri::FriProver;
+pub use fri::FriProver;
 use utils::collections::Vec;
 
 pub use math;
@@ -79,18 +79,17 @@ pub mod matrix;
 pub use matrix::{ColMatrix, RowMatrix};
 
 mod constraints;
-use constraints::ConstraintEvaluator;
-pub use constraints::{CompositionPoly, ConstraintCommitment};
+pub use constraints::{CompositionPoly, ConstraintCommitment, ConstraintEvaluator};
 
 mod composer;
-use composer::DeepCompositionPoly;
+pub use composer::DeepCompositionPoly;
 
 mod trace;
-pub use trace::{Trace, TraceTable, TraceTableFragment};
-use trace::{TraceCommitment, TraceLde, TracePolyTable};
+use trace::TraceLde;
+pub use trace::{Trace, TraceCommitment, TracePolyTable, TraceTable, TraceTableFragment};
 
 mod channel;
-use channel::ProverChannel;
+pub use channel::ProverChannel;
 
 mod errors;
 pub use errors::ProverError;
@@ -364,7 +363,7 @@ pub trait Prover {
 
         // combine all trace polynomials together and merge them into the DEEP composition
         // polynomial
-        deep_composition_poly.add_trace_polys(trace_polys, ood_trace_states);
+        deep_composition_poly.add_trace_polys(&trace_polys, ood_trace_states);
 
         // merge columns of constraint composition polynomial into the DEEP composition polynomial;
         deep_composition_poly.add_composition_poly(composition_poly, ood_evaluations);
@@ -495,7 +494,44 @@ pub trait Prover {
 
         (trace_lde, trace_tree, trace_polys)
     }
+    fn build_trace_commitment_with_offset<E>(
+        &self,
+        trace: &ColMatrix<E>,
+        domain: &StarkDomain<Self::BaseField>,
+        offset: Self::BaseField,
+    ) -> (RowMatrix<E>, MerkleTree<Self::HashFn>, ColMatrix<E>)
+    where
+        E: FieldElement<BaseField = Self::BaseField>,
+    {
+        // extend the execution trace
+        #[cfg(feature = "std")]
+        let now = Instant::now();
+        let trace_polys = trace.interpolate_columns_with_offset(offset);
+        let trace_lde =
+            RowMatrix::evaluate_polys_over::<DEFAULT_SEGMENT_WIDTH>(&trace_polys, domain);
+        #[cfg(feature = "std")]
+        debug!(
+            "Extended execution trace of {} columns from 2^{} to 2^{} steps ({}x blowup) in {} ms",
+            trace_lde.num_cols(),
+            trace_polys.num_rows().ilog2(),
+            trace_lde.num_rows().ilog2(),
+            domain.trace_to_lde_blowup(),
+            now.elapsed().as_millis()
+        );
 
+        // build trace commitment
+        #[cfg(feature = "std")]
+        let now = Instant::now();
+        let trace_tree = trace_lde.commit_to_rows();
+        #[cfg(feature = "std")]
+        debug!(
+            "Computed execution trace commitment (Merkle tree of depth {}) in {} ms",
+            trace_tree.depth(),
+            now.elapsed().as_millis()
+        );
+
+        (trace_lde, trace_tree, trace_polys)
+    }
     /// Evaluates constraint composition polynomial over the LDE domain and builds a commitment
     /// to these evaluations.
     ///

@@ -1,6 +1,6 @@
 [package]
 name = "winter-math"
-version = "0.6.4"
+version = "0.6.5"
 description = "Math library for the Winterfell STARK prover/verifier"
 authors = ["winterfell contributors"]
 readme = "README.md"

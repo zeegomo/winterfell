@@ -128,6 +128,27 @@ impl OodFrame {
 
         Ok((trace, evaluations))
     }
+
+    pub fn parse_link<E: FieldElement>(
+        self,
+        main_trace_width: usize,
+        aux_trace_width: usize,
+    ) -> Result<ParsedOodFrame<E>, DeserializationError> {
+        assert!(main_trace_width > 0, "trace width cannot be zero");
+
+        // parse main and auxiliary trace evaluation frames
+        let mut reader = SliceReader::new(&self.trace_states);
+        let frame_size = reader.read_u8()? as usize;
+        let trace = E::read_batch_from(
+            &mut reader,
+            (main_trace_width + aux_trace_width) * frame_size,
+        )?;
+        if reader.has_more_bytes() {
+            return Err(DeserializationError::UnconsumedBytes);
+        }
+
+        Ok((trace, vec![]))
+    }
 }
 
 impl Serializable for OodFrame {

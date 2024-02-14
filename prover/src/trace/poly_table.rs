@@ -18,6 +18,7 @@ use utils::collections::Vec;
 /// Coefficients of the polynomials for the main trace segment are always in the base field.
 /// However, coefficients of the polynomials for the auxiliary trace segments may be either in the
 /// base field, or in the extension field, depending on whether extension field is being used.
+#[derive(Clone)]
 pub struct TracePolyTable<E: FieldElement> {
     main_segment_polys: ColMatrix<E::BaseField>,
     aux_segment_polys: Vec<ColMatrix<E>>,
@@ -55,9 +56,21 @@ impl<E: FieldElement> TracePolyTable<E> {
         self.main_segment_polys.num_rows()
     }
 
+    pub fn evaluate_base_field_at(&self, x: E::BaseField) -> Vec<E::BaseField> {
+        self.main_segment_polys.evaluate_columns_at(x)
+    }
+
     /// Evaluates all trace polynomials (across all trace segments) at the specified point `x`.
     pub fn evaluate_at(&self, x: E) -> Vec<E> {
         let mut result = self.main_segment_polys.evaluate_columns_at(x);
+        for aux_polys in self.aux_segment_polys.iter() {
+            result.append(&mut aux_polys.evaluate_columns_at(x));
+        }
+        result
+    }
+
+    pub fn evaluate_aux_at(&self, x: E) -> Vec<E> {
+        let mut result = Vec::new();
         for aux_polys in self.aux_segment_polys.iter() {
             result.append(&mut aux_polys.evaluate_columns_at(x));
         }

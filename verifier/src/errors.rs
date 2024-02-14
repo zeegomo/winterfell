@@ -41,6 +41,7 @@ pub enum VerifierError {
     /// constraint evaluation queries do not represent a polynomial of the degree expected by the
     /// verifier.
     FriVerificationFailed(fri::VerifierError),
+    InconsistentTraceCommitments,
 }
 
 impl fmt::Display for VerifierError {
@@ -73,6 +74,9 @@ impl fmt::Display for VerifierError {
             }
             Self::FriVerificationFailed(err) => {
                 write!(f, "verification of low-degree proof failed: {err}")
+            }
+            Self::InconsistentTraceCommitments => {
+                write!(f, "trace commitments do not match")
             }
         }
     }

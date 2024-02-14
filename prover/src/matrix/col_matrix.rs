@@ -205,6 +205,18 @@ impl<E: FieldElement> ColMatrix<E> {
         Self { columns }
     }
 
+    pub fn interpolate_columns_with_offset(&self, offset: E::BaseField) -> Self {
+        let inv_twiddles = fft::get_inv_twiddles::<E::BaseField>(self.num_rows());
+        let columns = iter!(self.columns)
+            .map(|evaluations| {
+                let mut column = evaluations.clone();
+                fft::interpolate_poly_with_offset(&mut column, &inv_twiddles, offset);
+                column
+            })
+            .collect();
+        Self { columns }
+    }
+
     /// Interpolates columns of the matrix into polynomials in coefficient form and returns the
     /// result. The input matrix is consumed in the process.
     ///
