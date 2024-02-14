@@ -101,6 +101,13 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> TraceCommitmen
         *self.main_segment_tree.root()
     }
 
+    pub fn aux_trace_roots(&self) -> Vec<H::Digest> {
+        self.aux_segment_trees
+            .iter()
+            .map(|tree| *tree.root())
+            .collect()
+    }
+
     /// Returns the entire trace for the column at the specified index.
     #[cfg(test)]
     pub fn get_main_trace_column(&self, col_idx: usize) -> Vec<E::BaseField> {

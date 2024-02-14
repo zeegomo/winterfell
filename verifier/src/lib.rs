@@ -162,12 +162,12 @@ where
             let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
 
            
-            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
                 println!("inconsistent 1 {:?} {:?}", channel_1.read_trace_commitments()[0], channel.read_trace_1_commitments()[0]);
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
 
-            if channel_2.read_trace_commitments()[0] != channel.read_trace_2_commitments()[0] {
+            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
                 println!("inconsistent 2 {:?} {:?} |\n {:?} |\n {:?}", channel_2.read_trace_commitments()[0], channel.read_trace_2_commitments()[0], channel.read_trace_1_commitments()[0], channel.read_b_commitments()[0]);
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
@@ -183,7 +183,7 @@ where
             let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
             let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
 
-            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
 
@@ -200,7 +200,7 @@ where
             let channel = LinkVerifierChannel::new(&air, proof)?;
             let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
             let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
-            if channel_1.read_trace_commitments()[0] != channel.read_trace_1_commitments()[0] {
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
 
@@ -403,30 +403,18 @@ where
     // commitment is used to draw a set of random coefficients which the prover uses to compute
     // constraint composition polynomial.
     let main_trace_width = air.trace_layout().main_trace_width();
-    let aux_trace_width = air.trace_layout().aux_trace_width();
+    let _aux_trace_width = air.trace_layout().aux_trace_width();
     let trace_1_commitments = channel.read_trace_1_commitments();
     let trace_2_commitments = channel.read_trace_2_commitments();
     let b_commitments = channel.read_b_commitments();
 
     // reseed the coin with the commitment to the main trace segment
     public_coin.reseed(trace_1_commitments[0]);
+    public_coin.reseed(trace_1_commitments[1]);
     public_coin.reseed(trace_2_commitments[0]);
+    public_coin.reseed(trace_2_commitments[1]);
     public_coin.reseed(b_commitments[0]);
-
-    // // process auxiliary trace segments (if any), to build a set of random elements for each segment
-    // let mut aux_trace_rand_elements = AuxTraceRandElements::<E>::new();
-    // for (i, commitment) in trace_commitments.iter().skip(1).enumerate() {
-    //     let rand_elements = air
-    //         .get_aux_trace_segment_random_elements(i, &mut public_coin)
-    //         .map_err(|_| VerifierError::RandomCoinError)?;
-    //     aux_trace_rand_elements.add_segment_elements(rand_elements);
-    //     public_coin.reseed(*commitment);
-    // }
-
-    // // build random coefficients for the composition polynomial
-    // let constraint_coeffs = air
-    //     .get_constraint_composition_coefficients(&mut public_coin)
-    //     .map_err(|_| VerifierError::RandomCoinError)?;
+    public_coin.reseed(b_commitments[1]);
 
     // // 2 ----- constraint commitment --------------------------------------------------------------
     // // read the commitment to evaluations of the constraint composition polynomial over the LDE
@@ -434,14 +422,11 @@ where
     // // z from the coin; in the interactive version of the protocol, the verifier sends this point z
     // // to the prover, and the prover evaluates trace and constraint composition polynomials at z,
     // // and sends the results back to the verifier.
-    // let constraint_commitment = channel.read_constraint_commitment();
-    // public_coin.reseed(constraint_commitment);
     let z = public_coin
         .draw::<E>()
         .map_err(|_| VerifierError::RandomCoinError)?;
     let trace_length = air.trace_info().length() as u32;
     let g = E::BaseField::get_root_of_unity(trace_length.ilog2());
-    // println!("{trace_length} g: {}", g);
     let next_z = z * g.exp_vartime((trace_length - 2).into()).into();
     // 3 ----- OOD consistency check --------------------------------------------------------------
     // make sure that evaluations obtained by evaluating constraints over the out-of-domain frame
@@ -455,17 +440,7 @@ where
     let mut trace_2_ood_main_evals = channel.trace_2();
     let mut b_ood_main_evals = channel.b();
 
-    for i in 0..main_trace_width {
-        result.push(trace_1_ood_main_evals[i]);
-        result.push(trace_2_ood_main_evals[i]);
-        result.push(b_ood_main_evals[i]);
-    }
-
-    let trace_1_ood_aux_evals = trace_1_ood_main_evals.split_off(main_trace_width);
-    let trace_2_ood_aux_evals = trace_2_ood_main_evals.split_off(main_trace_width);
-    let b_ood_aux_evals = b_ood_main_evals.split_off(main_trace_width);
-
-    public_coin.reseed(H::hash_elements(&result));
+    // TODO: check ood evaluations for aux traces
     for i in 0..main_trace_width {
         let b_expected = (trace_1_ood_main_evals[i] - trace_2_ood_main_evals[i]) / (z - E::ONE);
         let b_actual = b_ood_main_evals[i];
@@ -476,10 +451,21 @@ where
         }
     }
 
-    // println!(
-    //     "VERIFIER: z: {}, next_z: {next_z} f_1(next_z): {}, f_2(z): {}, b(z): {} / {}",
-    //     z, trace_1_ood_main_evals[0], trace_2_ood_main_evals[0], b_ood_main_evals[0], b_expected
-    // );
+    for ((a, b), c) in trace_1_ood_main_evals
+        .iter()
+        .zip(trace_2_ood_main_evals.iter())
+        .zip(b_ood_main_evals.iter())
+    {
+        result.push(*a);
+        result.push(*b);
+        result.push(*c);
+    }
+
+    let trace_1_ood_aux_evals = trace_1_ood_main_evals.split_off(main_trace_width);
+    let trace_2_ood_aux_evals = trace_2_ood_main_evals.split_off(main_trace_width);
+    let b_ood_aux_evals = b_ood_main_evals.split_off(main_trace_width);
+
+    public_coin.reseed(H::hash_elements(&result));
 
     // read evaluations of composition polynomial columns sent by the prover, and reduce them into
     // a single value by computing \sum_{i=0}^{m-1}(z^(i * l) * value_i), where value_i is the
@@ -543,7 +529,6 @@ where
     // 6 ----- DEEP composition -------------------------------------------------------------------
     // compute evaluations of the DEEP composition polynomial at the queried positions
     let composer = DeepComposer::new(&air, &query_positions, z, deep_coefficients);
-    // println!("composing one {}", trace_1_ood_main_evals.len());
     let t1_composition = composer.compose_trace_columns_link(
         queried_trace_1_main_states,
         queried_trace_1_aux_states,
@@ -551,7 +536,6 @@ where
         Some(trace_1_ood_aux_evals),
         next_z,
     );
-    // println!("composing one {}", trace_2_ood_main_evals.len());
     let t2_composition = composer.compose_trace_columns_link(
         queried_trace_2_main_states,
         queried_trace_2_aux_states,
@@ -568,8 +552,6 @@ where
     );
     let mut deep_evaluations = composer.combine_compositions(t1_composition, t2_composition);
     deep_evaluations = composer.combine_compositions(deep_evaluations, b_composition);
-
-    // println!("{:?}", deep_evaluations);
 
     // 7 ----- Verify low-degree proof -------------------------------------------------------------
     // make sure that evaluations of the DEEP composition polynomial we computed in the previous

@@ -69,6 +69,14 @@ impl<E: FieldElement> TracePolyTable<E> {
         result
     }
 
+    pub fn evaluate_aux_at(&self, x: E) -> Vec<E> {
+        let mut result = Vec::new();
+        for aux_polys in self.aux_segment_polys.iter() {
+            result.append(&mut aux_polys.evaluate_columns_at(x));
+        }
+        result
+    }
+
     /// Returns an out-of-domain evaluation frame constructed by evaluating trace polynomials
     /// for all columns at points z and z * g, where g is the generator of the trace domain.
     pub fn get_ood_frame(&self, z: E) -> Vec<Vec<E>> {

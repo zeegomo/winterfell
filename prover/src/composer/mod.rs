@@ -62,7 +62,7 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
     /// parameter.
     pub fn add_trace_polys(
         &mut self,
-        trace_polys: TracePolyTable<E>,
+        trace_polys: &TracePolyTable<E>,
         ood_trace_states: Vec<Vec<E>>,
         z: E,
         next_z: Option<E>,

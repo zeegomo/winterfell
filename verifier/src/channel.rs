@@ -274,24 +274,22 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
         let lde_domain_size = air.lde_domain_size();
         let fri_options = air.options().to_fri_options();
 
-        // println!("parsing commitments size {}", commitments.0.len());
-
         // --- parse commitments ------------------------------------------------------------------
         let (trace_1_roots, trace_2_roots, b_roots, fri_roots) = commitments
-            .parse_link::<H>(1, fri_options.num_fri_layers(lde_domain_size)) // TODO: read aux segments
+            .parse_link::<H>(
+                num_trace_segments,
+                fri_options.num_fri_layers(lde_domain_size),
+            ) // TODO: read aux segments
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
-        // println!("parsing queries");
         // --- parse trace and constraint queries -------------------------------------------------
         let queries_length = trace_queries.len() / 3;
         let mut trace_2_queries = trace_queries.split_off(queries_length);
         let b_queries = trace_2_queries.split_off(queries_length);
-        let trace_1_queries = TraceQueries::new_link(trace_queries, air)?;
-        let trace_2_queries = TraceQueries::new_link(trace_2_queries, air)?;
-        let b_queries = TraceQueries::new_link(b_queries, air)?;
-        // let constraint_queries = ConstraintQueries::new(constraint_queries, air)?;
+        let trace_1_queries = TraceQueries::new(trace_queries, air)?;
+        let trace_2_queries = TraceQueries::new(trace_2_queries, air)?;
+        let b_queries = TraceQueries::new(b_queries, air)?;
 
-        // println!("parsing fri proofs");
         // --- parse FRI proofs -------------------------------------------------------------------
         let fri_num_partitions = fri_proof.num_partitions();
         let fri_remainder = fri_proof
@@ -301,29 +299,24 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> LinkVerifierCh
             .parse_layers::<H, E>(lde_domain_size, fri_options.folding_factor())
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
-        // println!("parsing ood frame");
         // --- parse out-of-domain evaluation frame -----------------------------------------------
         let (ood_evaluations, _) = ood_frame
-            .parse_link(main_trace_width, 0)
+            .parse_link(main_trace_width, aux_trace_width)
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
 
         Ok(Self {
-            // trace queries
-            // trace_roots,
             trace_1_roots,
             trace_2_roots,
             b_roots,
             trace_1_queries: Some(trace_1_queries),
             trace_2_queries: Some(trace_2_queries),
             b_queries: Some(b_queries),
-            // constraint queries
             // FRI proof
             fri_roots: Some(fri_roots),
             fri_layer_proofs,
             fri_layer_queries,
             fri_remainder: Some(fri_remainder),
             fri_num_partitions,
-            // out-of-domain evaluation
             ood_evaluations: Some(ood_evaluations),
             // query seed
             pow_nonce,
@@ -489,13 +482,13 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> TraceQueries<E
         mut queries: Vec<Queries>,
         air: &A,
     ) -> Result<Self, VerifierError> {
-        // assert_eq!(
-        //     queries.len(),
-        //     1, // TODO: read aux segments
-        //     "expected {} trace segment queries, but received {}",
-        //     air.trace_layout().num_segments(),
-        //     queries.len()
-        // );
+        assert_eq!(
+            queries.len(),
+            air.trace_layout().num_segments(),
+            "expected {} trace segment queries, but received {}",
+            air.trace_layout().num_segments(),
+            queries.len()
+        );
 
         let num_queries = air.options().num_queries();
 
@@ -543,69 +536,6 @@ impl<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> TraceQueries<E
             query_proofs,
             main_states: main_segment_states,
             aux_states: aux_trace_states,
-        })
-    }
-
-    /// Parses the provided trace queries into trace states in the specified field and
-    /// corresponding Merkle authentication paths.
-    pub fn new_link<A: Air<BaseField = E::BaseField>>(
-        mut queries: Vec<Queries>,
-        air: &A,
-    ) -> Result<Self, VerifierError> {
-        // assert_eq!(
-        //     queries.len(),
-        //     1, // TODO: read aux segments
-        //     "expected {} trace segment queries, but received {}",
-        //     air.trace_layout().num_segments(),
-        //     queries.len()
-        // );
-
-        let num_queries = air.options().num_queries();
-
-        // parse main trace segment queries; parsing also validates that hashes of each table row
-        // form the leaves of Merkle authentication paths in the proofs
-        let main_segment_width = air.trace_layout().main_trace_width();
-        let main_segment_queries = queries.remove(0);
-        let (main_segment_query_proofs, main_segment_states) = main_segment_queries
-            .parse::<H, E::BaseField>(air.lde_domain_size(), num_queries, main_segment_width)
-            .map_err(|err| {
-                VerifierError::ProofDeserializationError(format!(
-                    "main trace segment query deserialization failed: {err}"
-                ))
-            })?;
-
-        // all query proofs will be aggregated into a single vector
-        let mut query_proofs = vec![main_segment_query_proofs];
-
-        // // parse auxiliary trace segment queries (if any), and merge resulting tables into a
-        // // single table; parsing also validates that hashes of each table row form the leaves
-        // // of Merkle authentication paths in the proofs
-        // let aux_trace_states = if air.trace_info().is_multi_segment() {
-        //     let mut aux_trace_states = Vec::new();
-        //     for (i, segment_queries) in queries.into_iter().enumerate() {
-        //         let segment_width = air.trace_layout().get_aux_segment_width(i);
-        //         let (segment_query_proof, segment_trace_states) = segment_queries
-        //             .parse::<H, E>(air.lde_domain_size(), num_queries, segment_width)
-        //             .map_err(|err| {
-        //                 VerifierError::ProofDeserializationError(format!(
-        //                     "auxiliary trace segment query deserialization failed: {err}"
-        //                 ))
-        //             })?;
-
-        //         query_proofs.push(segment_query_proof);
-        //         aux_trace_states.push(segment_trace_states);
-        //     }
-
-        //     // merge tables for each auxiliary segment into a single table
-        //     Some(Table::merge(aux_trace_states))
-        // } else {
-        //     None
-        // };
-
-        Ok(Self {
-            query_proofs,
-            main_states: main_segment_states,
-            aux_states: None,
         })
     }
 }
