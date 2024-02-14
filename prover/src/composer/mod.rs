@@ -143,14 +143,13 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
     /// Combines all trace polynomials into a single polynomial and saves the result into
     /// the DEEP composition polynomial. The combination is done as follows:
     ///
-    /// - Compute polynomials T'_i(x) = (T_i(x) - T_i(z)) / (x - z) and
-    ///   T''_i(x) = (T_i(x) - T_i(z * g)) / (x - z * g) for all i, where T_i(x) is a trace
+    /// - Compute polynomials T'_i(x) = (T_i(x) - T_i(z)) / (x - z) where T_i(x) is a trace
     ///   polynomial for column i.
-    /// - Then, combine together all T'_i(x) and T''_i(x) polynomials using a random linear
-    ///   combination as T(x) = sum((T'_i(x) + T''_i(x)) * cc_i) for all i, where cc_i is
+    /// - Then, combine together all T'_i(x) polynomials using a random linear
+    ///   combination as T(x) = sum(T'_i(x) * cc_i) for all i, where cc_i is
     ///   the coefficient for the random linear combination drawn from the public coin.
     ///
-    /// Note that evaluations of T_i(z) and T_i(z * g) are passed in via the `ood_trace_state`
+    /// Note that evaluations of T_i(z) are passed in via the `ood_trace_state`
     /// parameter.
     pub fn add_link_trace_polys(
         &mut self,
@@ -197,7 +196,7 @@ impl<E: FieldElement> DeepCompositionPoly<E> {
             i += 1;
         }
 
-        // divide the composition polynomials by (x - z) and (x - z * g), respectively,
+        // divide the composition polynomials by (x - z)
         // and add the resulting polynomials together; the output of this step
         // is a single trace polynomial T(x) and deg(T(x)) = trace_length - 2.
         let trace_poly = merge_trace_compositions(vec![t1_composition], vec![z]);

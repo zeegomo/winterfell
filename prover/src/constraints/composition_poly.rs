@@ -88,7 +88,7 @@ fn segment<E: FieldElement>(
     trace_len: usize,
     num_cols: usize,
 ) -> Vec<Vec<E>> {
-    debug_assert!(degree_of(&coefficients) < trace_len * num_cols,);
+    debug_assert!(degree_of(&coefficients) < trace_len * num_cols);
 
     coefficients
         .chunks(trace_len)
