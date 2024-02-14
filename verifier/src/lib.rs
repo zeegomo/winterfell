@@ -125,32 +125,27 @@ where
     }
 }
 
-#[rustfmt::skip]
 pub fn verify_link<AIR, HashFn, RandCoin>(
     proof_1: StarkProof,
     proof_2: StarkProof,
     link_proof: StarkProof,
     pub_inputs: AIR::PublicInputs,
-) -> Result<(), VerifierError> 
-where 
-    AIR: Air, 
+) -> Result<(), VerifierError>
+where
+    AIR: Air,
     HashFn: ElementHasher<BaseField = AIR::BaseField>,
     RandCoin: RandomCoin<BaseField = AIR::BaseField, Hasher = HashFn>,
 {
     let proof = link_proof;
 
-    
     // build a seed for the public coin; the initial seed is a hash of the proof context and the
     // public inputs, but as the protocol progresses, the coin will be reseeded with the info
     // received from the prover
     let mut public_coin_seed = proof.context.to_elements();
     public_coin_seed.append(&mut pub_inputs.to_elements());
-    
+
     // create AIR instance for the computation specified in the proof
     let air = AIR::new(proof.get_trace_info(), pub_inputs, proof.options().clone());
-
-
-    
 
     // figure out which version of the generic proof verification procedure to run. this is a sort
     // of static dispatch for selecting two generic parameter: extension field and hash function.
@@ -158,57 +153,65 @@ where
         FieldExtension::None => {
             let public_coin = RandCoin::new(&public_coin_seed);
             let channel = LinkVerifierChannel::new(&air, proof)?;
-            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
-            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
-
-           
-            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
-                println!("inconsistent 1 {:?} {:?}", channel_1.read_trace_commitments()[0], channel.read_trace_1_commitments()[0]);
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_2)?;
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments()
+                || channel_2.read_trace_commitments() != channel.read_trace_2_commitments()
+            {
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
 
-            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
-                println!("inconsistent 2 {:?} {:?} |\n {:?} |\n {:?}", channel_2.read_trace_commitments()[0], channel.read_trace_2_commitments()[0], channel.read_trace_1_commitments()[0], channel.read_b_commitments()[0]);
-                return Err(VerifierError::InconsistentTraceCommitments);
-            }
-
-            perform_link_verification::<AIR, AIR::BaseField, HashFn, RandCoin>(air, channel, public_coin)
-        },
+            perform_link_verification::<AIR, AIR::BaseField, HashFn, RandCoin>(
+                air,
+                channel,
+                public_coin,
+            )
+        }
         FieldExtension::Quadratic => {
             if !<QuadExtension<AIR::BaseField>>::is_supported() {
                 return Err(VerifierError::UnsupportedFieldExtension(2));
             }
             let public_coin = RandCoin::new(&public_coin_seed);
             let channel = LinkVerifierChannel::new(&air, proof)?;
-            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
-            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_2)?;
 
-            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments()
+                || channel_2.read_trace_commitments() != channel.read_trace_2_commitments()
+            {
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
-
-            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
-                return Err(VerifierError::InconsistentTraceCommitments);
-            }
-            perform_link_verification::<AIR, QuadExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
-        },
+            perform_link_verification::<AIR, QuadExtension<AIR::BaseField>, HashFn, RandCoin>(
+                air,
+                channel,
+                public_coin,
+            )
+        }
         FieldExtension::Cubic => {
             if !<CubeExtension<AIR::BaseField>>::is_supported() {
                 return Err(VerifierError::UnsupportedFieldExtension(3));
             }
             let public_coin = RandCoin::new(&public_coin_seed);
             let channel = LinkVerifierChannel::new(&air, proof)?;
-            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_1)?;
-            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> = VerifierChannel::new(&air, proof_2)?;
-            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments() {
+            let channel_1: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_1)?;
+            let channel_2: VerifierChannel<<AIR as Air>::BaseField, HashFn> =
+                VerifierChannel::new(&air, proof_2)?;
+            if channel_1.read_trace_commitments() != channel.read_trace_1_commitments()
+                || channel_2.read_trace_commitments() != channel.read_trace_2_commitments()
+            {
                 return Err(VerifierError::InconsistentTraceCommitments);
             }
-
-            if channel_2.read_trace_commitments() != channel.read_trace_2_commitments() {
-                return Err(VerifierError::InconsistentTraceCommitments);
-            }
-            perform_link_verification::<AIR, CubeExtension<AIR::BaseField>, HashFn, RandCoin>(air, channel, public_coin)
-        },
+            perform_link_verification::<AIR, CubeExtension<AIR::BaseField>, HashFn, RandCoin>(
+                air,
+                channel,
+                public_coin,
+            )
+        }
     }
 }
 

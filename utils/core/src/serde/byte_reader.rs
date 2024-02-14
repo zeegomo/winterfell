@@ -122,7 +122,7 @@ pub trait ByteReader {
 /// Implements [ByteReader] trait for a slice of bytes.
 pub struct SliceReader<'a> {
     source: &'a [u8],
-    pub pos: usize,
+    pos: usize,
 }
 
 impl<'a> SliceReader<'a> {

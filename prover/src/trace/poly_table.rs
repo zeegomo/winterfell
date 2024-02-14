@@ -108,48 +108,4 @@ impl<E: FieldElement> TracePolyTable<E> {
     pub fn get_main_trace_poly(&self, idx: usize) -> &[E::BaseField] {
         self.main_segment_polys.get_column(idx)
     }
-
-    // pub fn scale(&mut self, factor: E::BaseField) {
-    //     for col in self.main_segment_polys.columns_mut() {
-    //         for (pow, coeff) in col.iter_mut().enumerate() {
-    //             *coeff *= factor.exp_vartime((pow as u32).into());
-    //         }
-    //     }
-
-    //     for aux_segment in self.aux_segment_polys.iter_mut() {
-    //         for col in aux_segment.columns_mut() {
-    //             for (pow, coeff) in col.iter_mut().enumerate() {
-    //                 *coeff *= factor.exp_vartime((pow as u32).into()).into();
-    //             }
-    //         }
-    //     }
-    // }
-
-    // pub fn sub(&mut self, other: &Self) {
-    //     for (col, other_col) in self
-    //         .main_segment_polys
-    //         .columns_mut()
-    //         .zip(other.main_segment_polys.columns())
-    //     {
-    //         for (coeff, other_coeff) in col.iter_mut().zip(other_col.iter()) {
-    //             *coeff -= *other_coeff;
-    //         }
-    //     }
-
-    //     for (aux_segment, other_aux_segment) in self
-    //         .aux_segment_polys
-    //         .iter_mut()
-    //         .zip(other.aux_segment_polys.iter())
-    //     {
-    //         for (col, other_col) in aux_segment.columns_mut().zip(other_aux_segment.columns()) {
-    //             for (coeff, other_coeff) in col.iter_mut().zip(other_col.iter()) {
-    //                 *coeff -= *other_coeff;
-    //             }
-    //         }
-    //     }
-    // }
-
-    // pub fn main_polys(&self) -> &ColMatrix<E::BaseField> {
-    //     &self.main_segment_polys
-    // }
 }

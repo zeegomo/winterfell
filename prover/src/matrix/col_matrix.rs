@@ -27,7 +27,7 @@ use utils::iterators::*;
 /// - A matrix must consist of at least 1 column and at least 2 rows.
 /// - All columns must be of the same length.
 /// - Number of rows must be a power of two.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ColMatrix<E: FieldElement> {
     columns: Vec<Vec<E>>,
 }

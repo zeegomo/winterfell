@@ -236,14 +236,12 @@ pub trait Prover {
         // initialize trace commitment and trace polynomial table structs with the main trace
         // data; for multi-segment traces these structs will be used as accumulators of all
         // trace segments
-        let mut trace_commitment: TraceCommitment<E, <Self as Prover>::HashFn> =
-            TraceCommitment::new(
-                main_trace_lde,
-                main_trace_tree,
-                domain.trace_to_lde_blowup(),
-            );
+        let mut trace_commitment = TraceCommitment::new(
+            main_trace_lde,
+            main_trace_tree,
+            domain.trace_to_lde_blowup(),
+        );
         let mut trace_polys = TracePolyTable::new(main_trace_polys);
-        let poly_size = trace_polys.poly_size();
 
         // build auxiliary trace segments (if any), and append the resulting segments to trace
         // commitment and trace polynomial table structs
@@ -365,12 +363,7 @@ pub trait Prover {
 
         // combine all trace polynomials together and merge them into the DEEP composition
         // polynomial
-        deep_composition_poly.add_trace_polys(
-            &trace_polys,
-            ood_trace_states,
-            z,
-            Some(E::from(E::BaseField::get_root_of_unity(poly_size.ilog2())) * z),
-        );
+        deep_composition_poly.add_trace_polys(&trace_polys, ood_trace_states);
 
         // merge columns of constraint composition polynomial into the DEEP composition polynomial;
         deep_composition_poly.add_composition_poly(composition_poly, ood_evaluations);
