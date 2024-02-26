@@ -4,6 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use math::{StarkField, ToElements};
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, string::ToString, ByteReader, ByteWriter, Deserializable,
     DeserializationError, Serializable,
@@ -154,7 +155,7 @@ impl TraceInfo {
 /// The number of random elements may be different from the number of columns in a given auxiliary
 /// segment. For example, an auxiliary segment may contain just one column, but may require many
 /// random elements.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TraceLayout {
     main_segment_width: usize,
     aux_segment_widths: [usize; NUM_AUX_SEGMENTS],

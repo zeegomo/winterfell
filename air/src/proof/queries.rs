@@ -6,6 +6,7 @@
 use super::Table;
 use crypto::{BatchMerkleProof, ElementHasher, Hasher};
 use math::FieldElement;
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
     SliceReader,
@@ -27,7 +28,7 @@ use utils::{
 /// Internally, all Merkle paths and query values are stored as a sequence of bytes. Thus, to
 /// retrieve query values and the corresponding Merkle authentication paths,
 /// [parse()](Queries::parse) function should be used.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Queries {
     paths: Vec<u8>,
     values: Vec<u8>,

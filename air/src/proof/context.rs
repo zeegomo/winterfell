@@ -5,6 +5,7 @@
 
 use crate::{ProofOptions, TraceInfo, TraceLayout};
 use math::{StarkField, ToElements};
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, string::ToString, ByteReader, ByteWriter, Deserializable,
     DeserializationError, Serializable,
@@ -13,7 +14,7 @@ use utils::{
 // PROOF CONTEXT
 // ================================================================================================
 /// Basic metadata about a specific execution of a computation.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Context {
     trace_layout: TraceLayout,
     trace_length: usize,

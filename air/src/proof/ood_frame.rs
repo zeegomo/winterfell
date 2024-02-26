@@ -4,6 +4,7 @@
 // LICENSE file in the root directory of this source tree.
 
 use math::FieldElement;
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
     SliceReader,
@@ -27,7 +28,7 @@ type ParsedOodFrame<E> = (Vec<E>, Vec<E>);
 ///
 /// Internally, the evaluations are stored as a sequence of bytes. Thus, to retrieve the
 /// evaluations, [parse()](OodFrame::parse) function should be used.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct OodFrame {
     trace_states: Vec<u8>,
     evaluations: Vec<u8>,
