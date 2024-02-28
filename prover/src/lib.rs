@@ -226,8 +226,11 @@ pub trait Prover {
         );
 
         // extend the main execution trace and build a Merkle tree from the extended trace
-        let (main_trace_lde, main_trace_tree, main_trace_polys) =
-            self.build_trace_commitment::<Self::BaseField>(trace.main_segment(), &domain);
+        let (main_trace_lde, main_trace_tree, main_trace_polys) = self
+            .build_trace_commitment::<Self::BaseField, DEFAULT_SEGMENT_WIDTH>(
+                trace.main_segment(),
+                &domain,
+            );
 
         // commit to the LDE of the main trace by writing the root of its Merkle tree into
         // the channel
@@ -268,7 +271,7 @@ pub trait Prover {
 
             // extend the auxiliary trace segment and build a Merkle tree from the extended trace
             let (aux_segment_lde, aux_segment_tree, aux_segment_polys) =
-                self.build_trace_commitment::<E>(&aux_segment, &domain);
+                self.build_trace_commitment::<E, DEFAULT_SEGMENT_WIDTH>(&aux_segment, &domain);
 
             // commit to the LDE of the extended auxiliary trace segment  by writing the root of
             // its Merkle tree into the channel
@@ -327,8 +330,8 @@ pub trait Prover {
         );
 
         // then, build a commitment to the evaluations of the composition polynomial columns
-        let constraint_commitment =
-            self.build_constraint_commitment::<E>(&composition_poly, &domain);
+        let constraint_commitment = self
+            .build_constraint_commitment::<E, DEFAULT_SEGMENT_WIDTH>(&composition_poly, &domain);
 
         // then, commit to the evaluations of constraints by writing the root of the constraint
         // Merkle tree into the channel
@@ -457,7 +460,7 @@ pub trait Prover {
     ///
     /// Trace commitment is computed by hashing each row of the extended execution trace, and then
     /// building a Merkle tree from the resulting hashes.
-    fn build_trace_commitment<E>(
+    fn build_trace_commitment<E, const N: usize>(
         &self,
         trace: &ColMatrix<E>,
         domain: &StarkDomain<Self::BaseField>,
@@ -469,8 +472,7 @@ pub trait Prover {
         #[cfg(feature = "std")]
         let now = Instant::now();
         let trace_polys = trace.interpolate_columns();
-        let trace_lde =
-            RowMatrix::evaluate_polys_over::<DEFAULT_SEGMENT_WIDTH>(&trace_polys, domain);
+        let trace_lde = RowMatrix::evaluate_polys_over::<N>(&trace_polys, domain);
         #[cfg(feature = "std")]
         debug!(
             "Extended execution trace of {} columns from 2^{} to 2^{} steps ({}x blowup) in {} ms",
@@ -494,7 +496,7 @@ pub trait Prover {
 
         (trace_lde, trace_tree, trace_polys)
     }
-    fn build_trace_commitment_with_offset<E>(
+    fn build_trace_commitment_with_offset<E, const N: usize>(
         &self,
         trace: &ColMatrix<E>,
         domain: &StarkDomain<Self::BaseField>,
@@ -507,8 +509,7 @@ pub trait Prover {
         #[cfg(feature = "std")]
         let now = Instant::now();
         let trace_polys = trace.interpolate_columns_with_offset(offset);
-        let trace_lde =
-            RowMatrix::evaluate_polys_over::<DEFAULT_SEGMENT_WIDTH>(&trace_polys, domain);
+        let trace_lde = RowMatrix::evaluate_polys_over::<N>(&trace_polys, domain);
         #[cfg(feature = "std")]
         debug!(
             "Extended execution trace of {} columns from 2^{} to 2^{} steps ({}x blowup) in {} ms",
@@ -540,7 +541,7 @@ pub trait Prover {
     ///
     /// The commitment is computed by hashing each row in the evaluation matrix, and then building
     /// a Merkle tree from the resulting hashes.
-    fn build_constraint_commitment<E>(
+    fn build_constraint_commitment<E, const N: usize>(
         &self,
         composition_poly: &CompositionPoly<E>,
         domain: &StarkDomain<Self::BaseField>,
@@ -551,10 +552,8 @@ pub trait Prover {
         // evaluate composition polynomial columns over the LDE domain
         #[cfg(feature = "std")]
         let now = Instant::now();
-        let composed_evaluations = RowMatrix::evaluate_polys_over::<DEFAULT_SEGMENT_WIDTH>(
-            composition_poly.data(),
-            domain,
-        );
+        let composed_evaluations =
+            RowMatrix::evaluate_polys_over::<N>(composition_poly.data(), domain);
         #[cfg(feature = "std")]
         debug!(
             "Evaluated {} composition polynomial columns over LDE domain (2^{} elements) in {} ms",
