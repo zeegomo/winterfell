@@ -5,6 +5,7 @@
 
 use core::{fmt::Debug, slice};
 use math::{FieldElement, StarkField};
+use serde::{Deserialize, Serialize};
 use utils::{ByteReader, Deserializable, DeserializationError, Serializable};
 
 mod blake;
@@ -83,6 +84,28 @@ pub trait Digest:
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct ByteDigest<const N: usize>([u8; N]);
+
+impl<const N: usize> Serialize for ByteDigest<N> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(&self.0)
+    }
+}
+
+impl<'de, const N: usize> Deserialize<'de> for ByteDigest<N> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let vec = Vec::<u8>::deserialize(deserializer)?;
+        if vec.len() != N {
+            return Err(serde::de::Error::custom(format!(
+                "expected {} bytes, but received {}",
+                N,
+                vec.len()
+            )));
+        }
+        let mut bytes = [0; N];
+        bytes.copy_from_slice(&vec);
+        Ok(ByteDigest(bytes))
+    }
+}
 
 impl<const N: usize> ByteDigest<N> {
     pub fn new(value: [u8; N]) -> Self {

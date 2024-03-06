@@ -10,6 +10,7 @@ use core::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     slice,
 };
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, string::ToString, AsBytes, ByteReader, ByteWriter, Deserializable,
     DeserializationError, Randomizable, Serializable, SliceReader,
@@ -24,7 +25,7 @@ use utils::{
 /// defined by the implementation of the [ExtensibleField] trait, and α and β are base field
 /// elements.
 #[repr(C)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct QuadExtension<B: ExtensibleField<2>>(B, B);
 
 impl<B: ExtensibleField<2>> QuadExtension<B> {

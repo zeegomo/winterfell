@@ -7,6 +7,7 @@ use super::{ColMatrix, Segment};
 use crate::StarkDomain;
 use crypto::{ElementHasher, MerkleTree};
 use math::{fft, FieldElement, StarkField};
+use serde::{Deserialize, Serialize};
 use utils::collections::Vec;
 use utils::{batch_iter_mut, flatten_vector_elements, uninit_vector};
 
@@ -27,7 +28,7 @@ use utils::iterators::*;
 ///
 /// In some cases, rows may be padded with extra elements. The number of elements which are
 /// accessible via the [RowMatrix::row()] method is specified by the `elements_per_row` member.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RowMatrix<E: FieldElement> {
     /// Field elements stored in the matrix.
     data: Vec<E::BaseField>,
@@ -36,6 +37,37 @@ pub struct RowMatrix<E: FieldElement> {
     /// Number of field elements in a single row accessible via the [RowMatrix::row()] method. This
     /// must be equal to or smaller than `row_width`.
     elements_per_row: usize,
+}
+
+impl<E> Serialize for RowMatrix<E>
+where
+    E: FieldElement,
+    E::BaseField: Serialize,
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        (&self.data, self.row_width, self.elements_per_row).serialize(serializer)
+    }
+}
+
+impl<'de, E> Deserialize<'de> for RowMatrix<E>
+where
+    E: FieldElement,
+    E::BaseField: Deserialize<'de>,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let (data, row_width, elements_per_row) = Deserialize::deserialize(deserializer)?;
+        Ok(RowMatrix {
+            data,
+            row_width,
+            elements_per_row,
+        })
+    }
 }
 
 impl<E: FieldElement> RowMatrix<E> {

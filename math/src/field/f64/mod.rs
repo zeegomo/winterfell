@@ -22,6 +22,7 @@ use core::{
     ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign},
     slice,
 };
+use serde::{Deserialize, Serialize};
 use utils::{
     collections::Vec, string::ToString, AsBytes, ByteReader, ByteWriter, Deserializable,
     DeserializationError, Randomizable, Serializable,
@@ -49,7 +50,7 @@ const ELEMENT_BYTES: usize = core::mem::size_of::<u64>();
 ///
 /// Internal values represent x * R mod M where R = 2^64 mod M and x in [0, M).
 /// The backing type is `u64` but the internal values are always in the range [0, M).
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct BaseElement(u64);
 impl BaseElement {
     /// Creates a new field element from the provided `value`; the value is converted into

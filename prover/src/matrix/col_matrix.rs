@@ -7,10 +7,10 @@ use crate::StarkDomain;
 use core::{iter::FusedIterator, slice};
 use crypto::{ElementHasher, MerkleTree};
 use math::{fft, polynom, FieldElement};
-use utils::{batch_iter_mut, collections::Vec, iter, iter_mut, uninit_vector};
-
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "concurrent")]
 use utils::iterators::*;
+use utils::{batch_iter_mut, collections::Vec, iter, iter_mut, uninit_vector};
 
 // COLUMN-MAJOR MATRIX
 // ================================================================================================
@@ -27,7 +27,7 @@ use utils::iterators::*;
 /// - A matrix must consist of at least 1 column and at least 2 rows.
 /// - All columns must be of the same length.
 /// - Number of rows must be a power of two.
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct ColMatrix<E: FieldElement> {
     columns: Vec<Vec<E>>,
 }

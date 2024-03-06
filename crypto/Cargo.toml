@@ -34,6 +34,7 @@ blake3 = { version = "1.3", default-features = false }
 math = { version = "0.6", path = "../math", package = "winter-math", default-features = false }
 sha3 = { version = "0.10", default-features = false }
 utils = { version = "0.6", path = "../utils/core", package = "winter-utils", default-features = false }
+serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.5"

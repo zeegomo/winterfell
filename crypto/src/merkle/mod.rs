@@ -5,6 +5,7 @@
 
 use crate::{errors::MerkleTreeError, hash::Hasher};
 use core::slice;
+use serde::{Deserialize, Serialize};
 use utils::collections::{BTreeMap, BTreeSet, Vec};
 
 mod proofs;
@@ -83,10 +84,39 @@ mod tests;
 /// assert!(MerkleTree::<Blake3>::verify(*tree.root(), 2, &proof).is_ok());
 /// assert!(MerkleTree::<Blake3>::verify(*tree.root(), 1, &proof).is_err());
 /// ```
-#[derive(Debug)]
 pub struct MerkleTree<H: Hasher> {
     nodes: Vec<H::Digest>,
     leaves: Vec<H::Digest>,
+}
+
+impl<H: Hasher> PartialEq for MerkleTree<H>
+where
+    H::Digest: PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.nodes == other.nodes && self.leaves == other.leaves
+    }
+}
+
+impl<H> Serialize for MerkleTree<H>
+where
+    H: Hasher,
+    H::Digest: Serialize,
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        (&self.nodes, &self.leaves).serialize(serializer)
+    }
+}
+
+impl<'de, H> Deserialize<'de> for MerkleTree<H>
+where
+    H: Hasher,
+    H::Digest: Deserialize<'de>,
+{
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let (nodes, leaves) = <(Vec<H::Digest>, Vec<H::Digest>)>::deserialize(deserializer)?;
+        Ok(MerkleTree { nodes, leaves })
+    }
 }
 
 // MERKLE TREE IMPLEMENTATION
